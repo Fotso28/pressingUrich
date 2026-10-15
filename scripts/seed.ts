@@ -40,9 +40,15 @@ const SERVICES: [string, string][] = [
   ["Nettoyage à sec", "Sec"],
 ];
 
+// `--if-configured` (build Vercel) : n'échoue pas si aucun mot de passe de gérant n'est fourni.
+const IF_CONFIGURED = process.argv.includes("--if-configured");
+
 async function main() {
   const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL manquant");
+  if (!url) {
+    if (IF_CONFIGURED) { console.warn("DATABASE_URL absent : seed ignoré."); return; }
+    throw new Error("DATABASE_URL manquant");
+  }
   let db;
   let close: () => Promise<void>;
   if (/\.neon\.tech/.test(url)) {
@@ -62,7 +68,10 @@ async function main() {
   if (admins.length === 0) {
     const username = (process.env.SEED_ADMIN_USERNAME ?? "gerant").toLowerCase();
     const password = process.env.SEED_ADMIN_PASSWORD;
-    if (!password || password.length < 6) throw new Error("SEED_ADMIN_PASSWORD (6 caractères min.) requis pour créer le gérant");
+    if (!password || password.length < 6) {
+      if (IF_CONFIGURED) { console.warn("SEED_ADMIN_PASSWORD absent : gérant non créé."); await close(); return; }
+      throw new Error("SEED_ADMIN_PASSWORD (6 caractères min.) requis pour créer le gérant");
+    }
     const id = randomUUID();
     await d.insert(s.user).values({
       id, name: process.env.SEED_ADMIN_NAME ?? "Gérant", email: `${username}@pressing.local`,

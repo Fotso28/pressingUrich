@@ -35,6 +35,7 @@ export function UsersManager({ users, meId }: { users: U[]; meId: string }) {
               </div>
               <Badge className={u.role === "ADMIN" ? "bg-brand-50 text-brand ring-brand-100" : "bg-subtle text-ink-2 ring-line"}>{u.role === "ADMIN" ? "Gérant" : "Agent"}</Badge>
               {!u.active && <Badge className="bg-danger-50 text-danger ring-[#fbd5d5]">Désactivé</Badge>}
+              {u.id === meId && <Button size="sm" variant="ghost" onClick={() => setReset(u)}><KeyRound />Changer mon mot de passe</Button>}
               {u.id !== meId && (
                 <div className="flex gap-1">
                   <Button size="sm" variant="ghost" onClick={() => setReset(u)}><KeyRound />Mot de passe</Button>
@@ -82,9 +83,9 @@ function ResetDialog({ user, onClose, onDone }: { user: U; onClose: () => void; 
   const { exec, pending } = useAction();
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title="Réinitialiser le mot de passe" description={`${user.name} sera déconnecté de tous ses appareils.`}>
+      <DialogContent title="Réinitialiser le mot de passe" description={`${user.name} sera déconnecté de tous ses appareils et devra se reconnecter.`}>
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); exec(() => resetUserPassword({ userId: user.id, password }), { success: "Mot de passe réinitialisé.", onSuccess: onDone }); }}>
-          <Field label="Nouveau mot de passe provisoire"><Input autoFocus required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+          <Field label="Nouveau mot de passe" hint="6 caractères minimum."><Input autoFocus required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
             <SaveButton type="submit" loading={pending}>Réinitialiser</SaveButton>

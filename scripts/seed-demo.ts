@@ -65,7 +65,11 @@ function shopHours(d: Date): Date {
 const dayKey = (d: Date) => { const z = local(d); return `${z.getFullYear()}-${String(z.getMonth() + 1).padStart(2, "0")}-${String(z.getDate()).padStart(2, "0")}`; };
 const monthKey = (d: Date) => dayKey(d).slice(0, 7);
 
+// `--if-empty` (build Vercel) : ne s'exécute que si SEED_DEMO=1 et qu'aucune commande n'existe.
+const IF_EMPTY = process.argv.includes("--if-empty");
+
 async function main() {
+  if (IF_EMPTY && process.env.SEED_DEMO !== "1") return;
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL manquant");
   let db: ReturnType<typeof drizzleNeon<typeof s>>;
@@ -80,6 +84,7 @@ async function main() {
   }
 
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(s.orders);
+  if (n > 0 && IF_EMPTY) { console.log("Données déjà présentes : seed de démonstration ignoré."); await close(); return; }
   if (n > 0 && process.env.DEMO_RESET !== "1") throw new Error(`${n} commandes existent déjà. Relancez avec DEMO_RESET=1 pour tout effacer et régénérer.`);
   if (process.env.DEMO_RESET === "1") {
     await db.execute(sql`TRUNCATE outflows, cash_session_counts, expenses, payments, order_status_history, order_items, orders, cash_sessions, customers RESTART IDENTITY CASCADE`);
@@ -89,7 +94,10 @@ async function main() {
 
   // Catalogue et gérant (créés par `pnpm db:seed`)
   const [admin] = await db.select().from(s.user).where(eq(s.user.role, "ADMIN")).limit(1);
-  if (!admin) throw new Error("Aucun gérant : lancez d'abord `pnpm db:seed`.");
+  if (!admin) {
+    if (IF_EMPTY) { console.warn("Aucun gérant : seed de démonstration ignoré."); await close(); return; }
+    throw new Error("Aucun gérant : lancez d'abord `pnpm db:seed`.");
+  }
   const catalog = await db.select({
     itemTypeId: s.prices.itemTypeId, serviceId: s.prices.serviceId, amount: s.prices.amount, item: s.itemTypes.name, service: s.services.shortName,
   }).from(s.prices).innerJoin(s.itemTypes, eq(s.itemTypes.id, s.prices.itemTypeId)).innerJoin(s.services, eq(s.services.id, s.prices.serviceId))
@@ -102,6 +110,7 @@ async function main() {
 
   // Agents comptoir
   const agentPassword = process.env.DEMO_AGENT_PASSWORD ?? "agent123";
+  if (agentPassword.length < 6) throw new Error("DEMO_AGENT_PASSWORD : 6 caractères minimum.");
   const agents: { id: string; name: string }[] = [];
   for (const [username, name] of [["paul", "Paul Essomba"], ["brigitte", "Brigitte Ngo Bassong"]]) {
     const [existing] = await db.select().from(s.user).where(eq(s.user.username, username)).limit(1);
@@ -383,7 +392,7 @@ async function main() {
   console.log("\nDépenses (sorties + caisse) et bénéfice par mois :");
   for (const mo of months) console.log(`  ${mo.key}  dépenses ${String(outByMonth.get(mo.key) ?? 0).padStart(8)}  bénéfice ${String((byMonth.get(mo.key) ?? 0) - (outByMonth.get(mo.key) ?? 0)).padStart(8)}`);
   console.log(`  Moyenne des mois complets : ${Math.round(fullVals.reduce((a, b) => a + b, 0) / fullVals.length)} · min ${Math.min(...fullVals)} · max ${Math.max(...fullVals)}`);
-  console.log(`\nComptes de démo : gérant « ${admin.username} », agents « paul » et « brigitte » (mot de passe agents : ${agentPassword}).`);
+  console.log(`\nComptes de démo : gérant « ${admin.username} », agents « paul » et « brigitte » (mot de passe : DEMO_AGENT_PASSWORD${process.env.DEMO_AGENT_PASSWORD ? "" : ", défaut agent123"}).`);
   await close();
 }
 

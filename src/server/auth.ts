@@ -8,7 +8,10 @@ import { db } from "./db";
 import * as schema from "./db/schema";
 
 // Sur Vercel, les URL de prévisualisation changent à chaque déploiement : on les accepte aussi.
-const vercelOrigins = [process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]
+const vercelOrigins = [
+  process.env.VERCEL_ENV === "production" ? process.env.VERCEL_PROJECT_PRODUCTION_URL : process.env.VERCEL_URL,
+  process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL,
+]
   .filter((h): h is string => !!h)
   .map((h) => `https://${h}`);
 
