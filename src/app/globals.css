@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --color-ink: #0e1726;          /* texte principal */
+  --color-ink-2: #3b4658;        /* texte secondaire */
+  --color-ink-3: #6b7486;        /* texte tertiaire, libellés */
+  --color-line: #e6e9ef;         /* bordures */
+  --color-line-2: #d5dae3;
+  --color-canvas: #f7f8fa;       /* fond */
+  --color-surface: #ffffff;
+  --color-subtle: #f1f3f7;
+
+  /* Couleurs du logo Continental Pressing */
+  --color-brand: #2f4797;        /* indigo « PRESSING » */
+  --color-brand-600: #283d83;
+  --color-brand-700: #21336e;
+  --color-brand-50: #eef1fa;
+  --color-brand-100: #dbe1f3;
+  --color-accent: #d6168a;       /* magenta « CONTINENTAL » */
+  --color-accent-50: #fdeef6;
+  --color-drop: #b0d8ec;         /* gouttes */
+
+  --color-success: #16a34a;
+  --color-success-50: #ecfdf3;
+  --color-warning: #ea8c00;
+  --color-warning-50: #fff6e8;
+  --color-danger: #dc2626;
+  --color-danger-50: #fef1f1;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-card: 0 1px 2px rgb(14 23 38 / 0.04), 0 1px 1px rgb(14 23 38 / 0.02);
+  --shadow-pop: 0 12px 32px -8px rgb(14 23 38 / 0.18), 0 2px 6px rgb(14 23 38 / 0.06);
+}
+
+@layer base {
+  html { -webkit-tap-highlight-color: transparent; }
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-size: 16px;
+    line-height: 1.5;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; border-radius: 4px; }
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+  ::selection { background: var(--color-brand-100); }
+}
+
+@utility tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum", "cv11"; }
+@utility eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-ink-3); }
+
+@keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes pop-in { from { opacity: 0; transform: translate(-50%, -48%) scale(0.98) } to { opacity: 1; transform: translate(-50%, -50%) scale(1) } }
+@keyframes shimmer { 0% { background-position: -400px 0 } 100% { background-position: 400px 0 } }
+.skeleton { background: linear-gradient(90deg, #eef0f4 0, #f6f7fa 40%, #eef0f4 80%); background-size: 800px 100%; animation: shimmer 1.4s infinite linear; border-radius: 8px; }
+
+@media print {
+  .no-print { display: none !important; }
+}
