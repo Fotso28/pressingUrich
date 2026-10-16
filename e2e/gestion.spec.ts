@@ -41,19 +41,49 @@ test.describe.serial("Gestion du gérant", () => {
     await expect(page.getByRole("row", { name: new RegExp(ITEM) })).toHaveCount(0);
   });
 
-  test("salaire : l'employé est choisi parmi les comptes utilisateurs", async ({ page }) => {
+  test("salaires : salaire de base, paiement prérempli, modification et suppression", async ({ page }) => {
     await login(page);
     await page.goto("/depenses");
-    await page.getByRole("button", { name: "Payer un salaire" }).click();
-    const dlg = page.getByRole("dialog");
-    const select = dlg.getByLabel("Employé");
-    const first = await select.locator("option:not([disabled])").first();
-    const name = (await first.textContent())!.split(" — ")[0];
-    await select.selectOption({ label: (await first.textContent())! });
-    await dlg.getByLabel("Montant").fill("45000");
+    const who = "Paul Essomba";
+    // Salaire de base (création / modification)
+    await page.getByRole("button", { name: `Salaire de base de ${who}` }).click();
+    let dlg = page.getByRole("dialog");
+    await dlg.getByLabel("Salaire mensuel").fill("80000");
+    await dlg.getByRole("button", { name: "Enregistrer" }).click();
+    await expect(page.getByText("Salaire de base enregistré.")).toBeVisible();
+    const row = page.locator("li", { hasText: who }).first();
+    await expect(row).toContainText(/80\s?000/);
+
+    // Paiement : montant prérempli avec le salaire de base (le mois peut déjà être payé : on supprime d'abord)
+    while (await page.getByRole("button", { name: `Supprimer le paiement de ${who}` }).count()) {
+      await page.getByRole("button", { name: `Supprimer le paiement de ${who}` }).first().click();
+      await page.getByRole("dialog").getByRole("textbox").fill("Test e2e : remise à zéro");
+      await page.getByRole("dialog").getByRole("button", { name: "Supprimer" }).click();
+      await expect(page.getByText("Paiement supprimé.").first()).toBeVisible();
+    }
+    await row.getByRole("button", { name: "Payer" }).click();
+    dlg = page.getByRole("dialog");
+    await expect(dlg.getByLabel("Montant")).toHaveValue(/80\s?000/);
     await dlg.getByRole("button", { name: /Enregistrer/ }).click();
     await expect(page.getByText("Salaire enregistré.")).toBeVisible();
-    await expect(page.getByText(`Salaire ${name}`).first()).toBeVisible();
+
+    // Modification du paiement
+    await page.getByRole("button", { name: `Modifier le paiement de ${who}` }).click();
+    dlg = page.getByRole("dialog");
+    await dlg.getByLabel("Montant").fill("85000");
+    await dlg.getByRole("button", { name: /Enregistrer/ }).click();
+    await expect(page.getByText("Modification enregistrée.")).toBeVisible();
+    await expect(page.locator("li", { hasText: who }).first()).toContainText(/85\s?000/);
+
+    // Suppression du paiement, puis retour au salaire de base d'origine
+    await page.getByRole("button", { name: `Supprimer le paiement de ${who}` }).click();
+    await page.getByRole("dialog").getByRole("textbox").fill("Test e2e : paiement en double");
+    await page.getByRole("dialog").getByRole("button", { name: "Supprimer" }).click();
+    await expect(page.getByText("Paiement supprimé.")).toBeVisible();
+    await page.getByRole("button", { name: `Salaire de base de ${who}` }).click();
+    await page.getByRole("dialog").getByLabel("Salaire mensuel").fill("75000");
+    await page.getByRole("dialog").getByRole("button", { name: "Enregistrer" }).click();
+    await expect(page.getByText("Salaire de base enregistré.")).toBeVisible();
   });
 
   test("encaissements du jour : page de détail accessible depuis l'accueil", async ({ page }) => {

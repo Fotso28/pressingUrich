@@ -138,11 +138,15 @@ async function main() {
   const agentPassword = process.env.DEMO_AGENT_PASSWORD ?? "agent123";
   if (agentPassword.length < 6) throw new Error("DEMO_AGENT_PASSWORD : 6 caractères minimum.");
   const agents: { id: string; name: string }[] = [];
-  for (const [username, name] of [["paul", "Paul Essomba"], ["brigitte", "Brigitte Ngo Bassong"]]) {
+  for (const [k, [username, name]] of ([["paul", "Paul Essomba"], ["brigitte", "Brigitte Ngo Bassong"]] as const).entries()) {
     const [existing] = await db.select().from(s.user).where(eq(s.user.username, username)).limit(1);
-    if (existing) { agents.push({ id: existing.id, name: existing.name }); continue; }
+    if (existing) {
+      // Salaire de base de l'employé (géré ensuite dans Dépenses › Salaires du mois).
+      if (existing.monthlySalary == null) await db.update(s.user).set({ monthlySalary: SALARIES[k] }).where(eq(s.user.id, existing.id));
+      agents.push({ id: existing.id, name: existing.name }); continue;
+    }
     const id = randomUUID();
-    await db.insert(s.user).values({ id, name, email: `${username}@pressing.local`, emailVerified: true, username, displayUsername: username, role: "AGENT", createdAt: at(2025, 9, 25, 9, 0) });
+    await db.insert(s.user).values({ id, name, email: `${username}@pressing.local`, emailVerified: true, username, displayUsername: username, role: "AGENT", monthlySalary: SALARIES[k], createdAt: at(2025, 9, 25, 9, 0) });
     await db.insert(s.account).values({ id: randomUUID(), accountId: id, providerId: "credential", userId: id, password: await hashPassword(agentPassword) });
     agents.push({ id, name });
   }

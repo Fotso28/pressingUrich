@@ -66,7 +66,7 @@ export async function salesBetween(from: Date, to: Date) {
 
 export type MoneyOut = {
   id: string; source: "SORTIE" | "CAISSE"; at: Date; category: OutflowCategory; label: string; amount: number; method: string;
-  beneficiary: string | null; beneficiaryUserId: string | null; salaryPeriod: string | null; by: string | null; voided: boolean; voidReason: string | null;
+  beneficiary: string | null; beneficiaryUserId: string | null; salaryPeriod: string | null; notes: string | null; by: string | null; voided: boolean; voidReason: string | null;
 };
 
 /** Toutes les sorties d'argent d'une période : sorties du gérant et dépenses de caisse. */
@@ -79,18 +79,18 @@ export async function listMoneyOut(from: Date, to: Date): Promise<MoneyOut[]> {
   ]);
   return [
     ...o.map(({ x, by }) => ({ id: x.id, source: "SORTIE" as const, at: x.occurredAt, category: x.category, label: x.label, amount: x.amount, method: x.method,
-      beneficiary: x.beneficiary, beneficiaryUserId: x.beneficiaryUserId, salaryPeriod: x.salaryPeriod, by, voided: !!x.voidedAt, voidReason: x.voidReason })),
+      beneficiary: x.beneficiary, beneficiaryUserId: x.beneficiaryUserId, salaryPeriod: x.salaryPeriod, notes: x.notes, by, voided: !!x.voidedAt, voidReason: x.voidReason })),
     ...e.map(({ x, by }) => ({ id: x.id, source: "CAISSE" as const, at: x.createdAt, category: expenseToOutflowCategory(x.category), label: x.label, amount: x.amount, method: x.method,
-      beneficiary: null, beneficiaryUserId: null, salaryPeriod: null, by, voided: !!x.voidedAt, voidReason: x.voidReason })),
+      beneficiary: null, beneficiaryUserId: null, salaryPeriod: null, notes: null, by, voided: !!x.voidedAt, voidReason: x.voidReason })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 }
 
-export type SalaryStaff = { id: string; name: string; role: string; lastAmount: number | null; lastPeriod: string | null };
+export type SalaryStaff = { id: string; name: string; role: string; monthlySalary: number | null; lastAmount: number | null; lastPeriod: string | null };
 
 /** Employés payables : les comptes utilisateurs actifs, avec leur dernier salaire pour préremplir le montant. */
 export async function salaryStaff(): Promise<SalaryStaff[]> {
   const [staff, last] = await Promise.all([
-    db.select({ id: user.id, name: user.name, role: user.role }).from(user).where(sql`coalesce(${user.banned}, false) = false`).orderBy(asc(user.name)),
+    db.select({ id: user.id, name: user.name, role: user.role, monthlySalary: user.monthlySalary }).from(user).where(sql`coalesce(${user.banned}, false) = false`).orderBy(asc(user.name)),
     db.selectDistinctOn([outflows.beneficiaryUserId], { userId: outflows.beneficiaryUserId, amount: outflows.amount, period: outflows.salaryPeriod }).from(outflows)
       .where(and(eq(outflows.category, "SALAIRES"), isNotNull(outflows.beneficiaryUserId), isNull(outflows.voidedAt)))
       .orderBy(outflows.beneficiaryUserId, desc(outflows.occurredAt)),

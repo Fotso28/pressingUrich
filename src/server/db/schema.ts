@@ -34,6 +34,7 @@ export const user = pgTable("user", {
   username: text("username").unique(),
   displayUsername: text("display_username"),
   role: text("role").notNull().default("AGENT"), // ADMIN | AGENT
+  monthlySalary: integer("monthly_salary"), // salaire mensuel de base (FCFA), null = non défini
   banned: boolean("banned").default(false),
   banReason: text("ban_reason"),
   banExpires: timestamp("ban_expires", { withTimezone: true }),

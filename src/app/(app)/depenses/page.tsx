@@ -55,10 +55,10 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
           </div>
         </Card>
         <SalaryBoard staff={staff} period={period} periodLabel={`${MONTHS[m - 1]} ${y}`}
-          paid={salaries.map((x) => ({ id: x.id, userId: x.beneficiaryUserId, name: x.beneficiary ?? x.label, amount: x.amount, at: x.at.toISOString() }))} />
+          paid={salaries.map((x) => ({ ...x, at: x.at.toISOString(), userId: x.beneficiaryUserId, name: x.beneficiary ?? x.label }))} />
       </div>
 
-      <MoneyOutTable rows={moves.map((x) => ({ ...x, at: x.at.toISOString() }))} />
+      <MoneyOutTable rows={moves.map((x) => ({ ...x, at: x.at.toISOString() }))} staff={staff} period={period} />
     </>
   );
 }
