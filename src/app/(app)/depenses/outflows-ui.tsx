@@ -131,7 +131,7 @@ function OutflowDialog({ salary, staff, defaultPeriod, defaultUserId, onClose, o
             </div>
           )}
           {isSalary ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Employé" htmlFor="salary-employee" hint="Comptes actifs de Paramètres › Utilisateurs">
                 <select id="salary-employee" autoFocus required value={employeeId} onChange={(e) => {
                   const u = staff.find((x) => x.id === e.target.value);
@@ -145,7 +145,7 @@ function OutflowDialog({ salary, staff, defaultPeriod, defaultUserId, onClose, o
               <Field label="Mois de salaire"><Input type="month" required value={period} onChange={(e) => setPeriod(e.target.value)} /></Field>
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Libellé">
                 <Input autoFocus required list="presets" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ex. Lessive (carton)" />
                 <datalist id="presets">{(PRESETS[category] ?? []).map((s) => <option key={s} value={s} />)}</datalist>
@@ -153,7 +153,7 @@ function OutflowDialog({ salary, staff, defaultPeriod, defaultUserId, onClose, o
               <Field label="Fournisseur / bénéficiaire (facultatif)"><Input value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} placeholder="ex. Quincaillerie Ndokoti" /></Field>
             </div>
           )}
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Montant"><AmountInput value={amount} onChange={setAmount} className="h-12 text-lg" /></Field>
             <Field label="Date"><Input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} className="h-12" /></Field>
           </div>

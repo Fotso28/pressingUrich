@@ -132,8 +132,8 @@ function ShellInner({ user, shopName, children }: { user: ShellUser; shopName: s
 
       <main className="mx-auto max-w-[1400px] px-4 pb-28 pt-6 sm:px-6 lg:pb-12 lg:pt-8">{children}</main>
 
-      {/* Bouton flottant + barre inférieure (téléphone) */}
-      {!path.startsWith("/depot") && !menuOpen && (
+      {/* Bouton flottant (pages de liste uniquement, pour ne pas masquer le contenu) + barre inférieure (téléphone) */}
+      {["/", "/commandes", "/clients"].includes(path) && !menuOpen && (
         <Link href="/depot/nouveau" className="no-print fixed bottom-[84px] right-4 z-30 flex h-14 items-center gap-2 rounded-full bg-brand pl-4 pr-5 font-medium text-white shadow-pop lg:hidden">
           <Plus className="size-5" /> Dépôt
         </Link>

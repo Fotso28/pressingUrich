@@ -36,7 +36,7 @@ export default async function ConfirmationPage({ params }: { params: Promise<{ i
           <div className="px-3 py-4"><dt className="eyebrow">Reste</dt><dd className={`mt-1.5 text-lg font-semibold ${remaining > 0 ? "text-warning" : ""}`}><Money value={remaining} /></dd></div>
         </dl>
         <p className="px-6 py-4 text-center text-[15px] text-ink-2">Retrait prévu le <span className="font-semibold text-ink tnum">{formatDateTime(o.order.dueAt)}</span>{o.order.isExpress && <span className="ml-2 rounded-full bg-warning-50 px-2 py-0.5 text-[12.5px] font-medium text-[#b56a00]">Express</span>}</p>
-        <div className="grid gap-2 border-t border-line p-5 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 border-t border-line p-5 sm:grid-cols-2">
           <PrintButton href={`/print/ticket/${o.order.id}`} size="lg">Imprimer le ticket</PrintButton>
           <PrintButton href={`/print/etiquettes/${o.order.id}`} size="lg">Imprimer les étiquettes</PrintButton>
           <Button asChild size="lg" className="sm:col-span-2"><Link href="/depot/nouveau"><Plus />Nouveau dépôt</Link></Button>

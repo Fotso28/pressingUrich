@@ -36,7 +36,7 @@ function ActionTiles() {
     { href: "/caisse", label: "Ma caisse", sub: "Encaissements, dépenses, clôture", icon: Wallet },
   ];
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       {tiles.map((t) => (
         <Link key={t.href} href={t.href}
           className={t.primary
@@ -74,7 +74,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         <Greeting name={user.name} />
         {!session && <div className="mb-6"><OpenCashCard compact /></div>}
         <div className="mb-6"><ActionTiles /></div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <Stat label="CA du jour" value={formatAmount(d.day.total)} sub="FCFA encaissés" tone="brand" href="/encaissements" />
           <Stat label="CA de la semaine" value={formatAmount(d.week.total)} sub="FCFA depuis lundi" />
           <Stat label="CA du mois" value={formatAmount(d.month.total)} sub="FCFA ce mois-ci" />
@@ -85,7 +85,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
           <CardHeader title="Ventes, dépenses et bénéfice" description="6 derniers mois, en FCFA" action={<Link href="/rapports" className="text-sm font-medium text-brand">Rapports</Link>} />
           <div className="border-t border-line px-4 pb-4 pt-5 sm:px-5"><FinanceChart data={fin} height={220} /></div>
         </Card>
-        <div className="mt-6 grid gap-6 xl:grid-cols-3">
+        <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
           <Card className="xl:col-span-1">
             <CardHeader title="Encaissements du jour" description="Par mode de paiement" action={<Link href="/encaissements" className="text-sm font-medium text-brand">Détail</Link>} />
             <ul className="divide-y divide-line px-5 pb-2">

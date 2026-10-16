@@ -36,18 +36,18 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <EditCustomerButton customer={{ id: c.id, fullName: c.fullName, phone: c.phone, address: c.address ?? "", notes: c.notes ?? "" }} />
           <Button asChild><Link href={`/depot/nouveau?client=${c.id}`}><PackagePlus />Nouveau dépôt pour ce client</Link></Button>
         </div>
       </div>
       {c.notes && <p className="mb-6 flex items-start gap-2 rounded-md border border-line bg-surface px-4 py-3 text-sm text-ink-2"><StickyNote className="mt-0.5 size-4 text-ink-3" />{c.notes}</p>}
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Stat label="Commandes en cours" value={c.openOrders} />
         <Stat label="Total dû" value={formatAmount(c.due)} sub="FCFA" tone={c.due > 0 ? "warning" : undefined} />
         <Stat label="Total payé" value={formatAmount(spent)} sub={`FCFA sur ${c.orders.length} commande(s)`} />
       </div>
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader title="Non retirées" description="Déposées, en traitement ou prêtes" />
           {open.length ? <OrderListCompact orders={open} show="due" /> : <EmptyState title="Aucune commande en cours" />}

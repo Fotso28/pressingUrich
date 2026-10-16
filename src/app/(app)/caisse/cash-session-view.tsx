@@ -41,7 +41,7 @@ export function CashSessionView({ summary, isAdmin }: { summary: Summary; isAdmi
 
   return (
     <>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
         <Card>
           <CardHeader title="Solde attendu par mode" description="Fond + encaissements − dépenses" />
           <div className="overflow-x-auto border-t border-line">

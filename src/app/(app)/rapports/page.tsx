@@ -90,13 +90,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </div>
       </Card>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Stat label={`Ventes · ${scope}`} value={formatAmount(tot.sales)} sub={month ? "FCFA encaissés" : `FCFA · moyenne ${formatAmount(Math.round(tot.sales / Math.max(1, months.length)))} / mois`} tone="brand" />
         <Stat label={`Dépenses · ${scope}`} value={formatAmount(tot.expenses)} sub="FCFA · caisse + sorties (intrants, salaires…)" />
         <Stat label={`Bénéfice · ${scope}`} value={formatAmount(tot.profit)} sub={tot.sales ? `FCFA · marge ${Math.round((tot.profit / tot.sales) * 100)} %` : "FCFA"} tone={tot.profit >= 0 ? "success" : "danger"} />
       </div>
 
-      <div className="mb-6 grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+      <div className="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <Card>
           <CardHeader title="Ventes, dépenses et bénéfice" description="Par mois, en FCFA" />
           <div className="border-t border-line px-4 pb-4 pt-5 sm:px-5">
@@ -131,13 +131,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </Card>
       </div>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Stat label="Impayés (à ce jour)" value={formatAmount(d.counters.unpaidSum)} sub={`FCFA sur ${d.counters.unpaidCount} commande(s)`} tone={d.counters.unpaidSum ? "warning" : undefined} />
         <Stat label="En souffrance" value={d.counters.abandoned} sub={`Prêtes depuis plus de ${d.counters.abandonedAfterDays} jours`} tone={d.counters.abandoned ? "danger" : undefined} />
         <Stat label="En retard" value={d.counters.late} sub="Date prévue dépassée, non prêtes" tone={d.counters.late ? "danger" : undefined} />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Card id="impayes">
           <CardHeader title="Commandes impayées" description="Triées par montant restant" />
           {unpaid.length ? <OrderListCompact orders={unpaid} show="remaining" /> : <EmptyState title="Aucun impayé" />}

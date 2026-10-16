@@ -55,7 +55,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
         <div className="space-y-6">
           <Card>
             <CardHeader title="Articles" description={`${o.items.reduce((s, i) => s + i.quantity, 0)} pièce(s)`} />
@@ -98,7 +98,8 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           </Card>
         </div>
 
-        <div className="space-y-6 lg:sticky lg:top-24">
+        {/* Téléphone : montant et actions avant le détail des articles */}
+        <div className="order-first space-y-6 lg:order-none lg:sticky lg:top-24">
           <Card>
             <div className="p-5">
               <p className="eyebrow">Reste à payer</p>

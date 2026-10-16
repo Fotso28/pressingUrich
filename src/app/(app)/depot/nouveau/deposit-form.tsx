@@ -141,7 +141,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
         ))}
       </ol>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start">
         {/* Colonne gauche : client puis articles */}
         <div className="space-y-6">
           <section className={cn(vis("client"), "rounded-lg border border-line bg-surface p-4 shadow-card sm:p-5")}>
@@ -185,7 +185,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
                   <p className="text-sm font-medium text-ink-2">Service pour <span className="font-semibold text-ink">{catalog.items.find((i) => i.id === pickedItem)?.name}</span></p>
                   <button type="button" onClick={() => setPickedItem(null)} className="grid size-9 place-items-center rounded-md text-ink-3 hover:bg-subtle lg:hidden" aria-label="Annuler"><X className="size-5" /></button>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   {catalog.services.map((s) => {
                     const p = priceOf(pickedItem, s.id);
                     if (p === undefined) return null;
@@ -245,7 +245,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
                         </button>
                       </div>
                       {l.open && (
-                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                           <Input value={l.color} onChange={(e) => updateLine(l.key, { color: e.target.value })} placeholder="Couleur" aria-label="Couleur" />
                           <Input value={l.brand} onChange={(e) => updateLine(l.key, { brand: e.target.value })} placeholder="Marque" aria-label="Marque" />
                           <Input className="sm:col-span-2" value={l.observations} onChange={(e) => updateLine(l.key, { observations: e.target.value })}

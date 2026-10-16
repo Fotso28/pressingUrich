@@ -33,7 +33,7 @@ export function ShopSettingsForm({ initial }: { initial: S }) {
   const set = <K extends keyof S>(k: K, v: S[K]) => setS((x) => ({ ...x, [k]: v }));
   return (
     <form onSubmit={(e) => { e.preventDefault(); exec(() => updateSettings(s), { success: "Paramètres enregistrés.", onSuccess: () => router.refresh() }); }}
-      className="grid gap-6 xl:grid-cols-2">
+      className="grid grid-cols-1 gap-6 xl:grid-cols-2">
       <Card>
         <CardHeader title="Informations du ticket" description="Imprimées en tête et en pied de ticket." />
         <div className="space-y-4 border-t border-line p-5">
@@ -46,7 +46,7 @@ export function ShopSettingsForm({ initial }: { initial: S }) {
       </Card>
       <Card>
         <CardHeader title="Délais et taux" description="Valeurs utilisées au dépôt." />
-        <div className="grid gap-4 border-t border-line p-5 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 border-t border-line p-5 sm:grid-cols-2">
           <NumberField label="Délai standard" unit="heures" value={s.standardDelayHours} onChange={(v) => set("standardDelayHours", v)} />
           <NumberField label="Délai express" unit="heures" value={s.expressDelayHours} onChange={(v) => set("expressDelayHours", v)} />
           <NumberField label="Majoration express" unit="%" value={s.expressRatePct} onChange={(v) => set("expressRatePct", v)} />
@@ -56,7 +56,7 @@ export function ShopSettingsForm({ initial }: { initial: S }) {
       </Card>
       <Card className="xl:col-span-2">
         <CardHeader title="Format du papier" description="Format utilisé par défaut pour les tickets, reçus, étiquettes et clôtures de caisse." />
-        <div className="grid gap-3 border-t border-line p-5 sm:grid-cols-3" role="radiogroup" aria-label="Format du papier">
+        <div className="grid grid-cols-1 gap-3 border-t border-line p-5 sm:grid-cols-3" role="radiogroup" aria-label="Format du papier">
           {PAPER_FORMATS.map((f) => (
             <button key={f.value} type="button" role="radio" aria-checked={s.paperFormat === f.value} onClick={() => set("paperFormat", f.value)}
               className={cn("rounded-lg border p-4 text-left transition", s.paperFormat === f.value ? "border-brand bg-brand-50 ring-3 ring-brand/10" : "border-line-2 hover:bg-subtle")}>

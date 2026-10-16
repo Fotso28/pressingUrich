@@ -37,7 +37,7 @@ export function UsersManager({ users, meId }: { users: U[]; meId: string }) {
               {!u.active && <Badge className="bg-danger-50 text-danger ring-[#fbd5d5]">Désactivé</Badge>}
               {u.id === meId && <Button size="sm" variant="ghost" onClick={() => setReset(u)}><KeyRound />Changer mon mot de passe</Button>}
               {u.id !== meId && (
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1">
                   <Button size="sm" variant="ghost" onClick={() => setReset(u)}><KeyRound />Mot de passe</Button>
                   <Button size="sm" variant="ghost" onClick={() => exec(() => setUserRole({ userId: u.id, role: u.role === "ADMIN" ? "AGENT" : "ADMIN" }), { success: "Rôle modifié.", onSuccess: () => router.refresh() })}>
                     <ShieldCheck />{u.role === "ADMIN" ? "Rendre agent" : "Rendre gérant"}

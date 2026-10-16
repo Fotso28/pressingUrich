@@ -222,7 +222,7 @@ function EditDialog({ order, onClose, onDone }: { order: OrderLite; onClose: () 
                   <p className="font-medium">{i.label}</p>
                   <Input type="number" min={1} max={999} value={i.quantity} onChange={(e) => upd(i.id, { quantity: Math.max(1, parseInt(e.target.value || "1", 10)) })} className="h-9 w-20 text-center tnum" aria-label="Quantité" />
                 </div>
-                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <Input value={i.color} onChange={(e) => upd(i.id, { color: e.target.value })} placeholder="Couleur" className="h-9" />
                   <Input value={i.brand} onChange={(e) => upd(i.id, { brand: e.target.value })} placeholder="Marque" className="h-9" />
                   <Input value={i.observations} onChange={(e) => upd(i.id, { observations: e.target.value })} placeholder="Observations" className="h-9" />
@@ -230,7 +230,7 @@ function EditDialog({ order, onClose, onDone }: { order: OrderLite; onClose: () 
               </div>
             ))}
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Retrait prévu"><Input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} /></Field>
             <Field label="Express">
               <button type="button" onClick={() => setIsExpress(!isExpress)} className={cn("flex h-11 w-full items-center justify-between rounded-md border px-3 text-sm font-medium", isExpress ? "border-warning bg-warning-50" : "border-line-2")}>

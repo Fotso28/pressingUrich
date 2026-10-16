@@ -159,7 +159,7 @@ function DepositTab({ state, onOpenCash, print }: { state: OfflineState; onOpenC
         <CheckCircle2 className="mx-auto size-10 text-success" />
         <h2 className="mt-3 text-xl font-semibold">Dépôt enregistré · Ticket n° {formatOrderNumber(done.number)}</h2>
         <p className="mt-1 text-sm text-ink-3">{done.customerName} · <Money value={done.total} /> · enregistré sur cet appareil</p>
-        <div className="mt-5 grid gap-2 sm:grid-cols-2">
+        <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
           <Button onClick={() => print(done, "ticket", state.user.name)}><Printer />Imprimer le ticket</Button>
           <Button variant="secondary" onClick={() => { setDone(null); setRound((r) => r + 1); }}><Plus />Nouveau dépôt</Button>
         </div>
@@ -346,7 +346,7 @@ function CashTab({ state }: { state: OfflineState }) {
           </table>
         </div>
       </Card>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Button variant="secondary" onClick={() => setDlg("expense")}><Plus />Ajouter une dépense</Button>
         <Button onClick={() => setDlg("close")}><Lock />Clôturer la caisse</Button>
       </div>

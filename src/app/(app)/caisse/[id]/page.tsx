@@ -33,7 +33,8 @@ export default async function CashSessionPage({ params, searchParams }: { params
       </div>
       <Card>
         <CardHeader title={closed ? "Clôture" : "Situation"} description={`Fond de caisse : ${s.session.openingFloat.toLocaleString("fr-FR")} FCFA`} />
-        <table className="w-full border-t border-line text-[14.5px]">
+        <div className="overflow-x-auto border-t border-line">
+        <table className="w-full text-[14.5px]">
           <thead><tr className="text-left text-[12.5px] font-medium uppercase tracking-[0.04em] text-ink-3"><th className="px-5 py-2.5">Mode</th><th className="px-3 py-2.5 text-right">Attendu</th>{closed && <><th className="px-3 py-2.5 text-right">Compté</th><th className="px-5 py-2.5 text-right">Écart</th></>}</tr></thead>
           <tbody className="divide-y divide-line">
             {s.rows.map((r) => {
@@ -49,9 +50,10 @@ export default async function CashSessionPage({ params, searchParams }: { params
             })}
           </tbody>
         </table>
+        </div>
         {s.session.closingComment && <p className="border-t border-line px-5 py-3 text-sm text-ink-2"><span className="font-medium text-ink">Commentaire :</span> {s.session.closingComment}</p>}
       </Card>
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
+      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader title="Encaissements" description={`${s.payments.length}`} />
           <ul className="divide-y divide-line border-t border-line">

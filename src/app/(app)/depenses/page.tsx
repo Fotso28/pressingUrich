@@ -47,7 +47,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         <Stat label="Salaires versés" value={formatAmount(salaries.reduce((s, x) => s + x.amount, 0))} sub={`FCFA · ${salaries.length} paiement(s)`} />
       </div>
 
-      <div className="mb-6 grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+      <div className="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <Card>
           <CardHeader title="Où part l'argent" description="Dépenses du mois par catégorie" />
           <div className="border-t border-line p-5">
