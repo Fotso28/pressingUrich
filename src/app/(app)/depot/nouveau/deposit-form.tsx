@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Minus, Plus, Trash2, ChevronDown, Zap, Search, ArrowLeft, ArrowRight, Check, MessageSquareText, Lock } from "lucide-react";
+import { Minus, Plus, Trash2, ChevronDown, Zap, Search, ArrowLeft, ArrowRight, Check, MessageSquareText, Lock, X } from "lucide-react";
 import { createOrder } from "@/server/actions/orders";
 import type { DepositCatalog } from "@/server/queries/catalog";
 import { CustomerPicker, type PickedCustomer } from "@/components/customers/customer-picker";
@@ -108,16 +108,17 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
   const stepIndex = STEPS.indexOf(step);
 
   return (
-    <div className="pb-24 lg:pb-0">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <div className="pb-20 lg:pb-0">
+      <div className="mb-4 flex items-center justify-between gap-3 lg:mb-6 lg:items-end">
         <div>
-          <h1 className="text-2xl font-semibold tracking-[-0.01em]">Nouveau dépôt</h1>
-          <p className="mt-1 text-[15px] text-ink-3">Client, articles, options, acompte.</p>
+          <h1 className="text-xl font-semibold tracking-[-0.01em] lg:text-2xl">Nouveau dépôt</h1>
+          <p className="mt-1 hidden text-[15px] text-ink-3 lg:block">Client, articles, options, acompte.</p>
         </div>
+        <Link href="/" className="grid size-10 place-items-center rounded-md text-ink-3 hover:bg-subtle lg:hidden" aria-label="Quitter le dépôt"><X className="size-5" /></Link>
       </div>
 
       {/* Progression (téléphone) */}
-      <ol className="mb-5 grid grid-cols-4 gap-1.5 lg:hidden">
+      <ol className="mb-4 grid grid-cols-4 gap-1.5 lg:hidden">
         {STEPS.map((s, i) => (
           <li key={s}>
             <button type="button" onClick={() => (i <= stepIndex || STEPS.slice(0, i).every((x) => canNext[x])) && setStep(s)} className="w-full text-left">
@@ -131,12 +132,12 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start">
         {/* Colonne gauche : client puis articles */}
         <div className="space-y-6">
-          <section className={cn(vis("client"), "rounded-lg border border-line bg-surface p-5 shadow-card")}>
+          <section className={cn(vis("client"), "rounded-lg border border-line bg-surface p-4 shadow-card sm:p-5")}>
             <StepTitle n={1} title="Client" done={!!customer} />
             <CustomerPicker value={customer} onChange={(c) => { setCustomer(c); if (c && window.innerWidth < 1024) setStep("articles"); }} />
           </section>
 
-          <section className={cn(vis("articles"), "rounded-lg border border-line bg-surface p-5 shadow-card")}>
+          <section className={cn(vis("articles"), "rounded-lg border border-line bg-surface p-4 shadow-card sm:p-5")}>
             <StepTitle n={2} title="Articles" done={lines.length > 0} />
             <div className="relative mb-4">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
@@ -160,15 +161,22 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
               </details>
             )}
             {pickedItem && (
-              <div className="mt-4 rounded-lg border border-brand-100 bg-brand-50/50 p-4">
-                <p className="mb-3 text-sm font-medium text-ink-2">Service pour <span className="font-semibold text-ink">{catalog.items.find((i) => i.id === pickedItem)?.name}</span></p>
+              <>
+              {/* Téléphone : choix du service dans un panneau en bas de l'écran, à portée de pouce */}
+              <button type="button" aria-label="Fermer" onClick={() => setPickedItem(null)} className="fixed inset-0 z-40 bg-ink/30 lg:hidden" />
+              <div role="dialog" aria-label="Choisir le service"
+                className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-line bg-surface p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-pop lg:static lg:z-auto lg:mt-4 lg:rounded-lg lg:border lg:border-brand-100 lg:bg-brand-50/50 lg:p-4 lg:shadow-none">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-ink-2">Service pour <span className="font-semibold text-ink">{catalog.items.find((i) => i.id === pickedItem)?.name}</span></p>
+                  <button type="button" onClick={() => setPickedItem(null)} className="grid size-9 place-items-center rounded-md text-ink-3 hover:bg-subtle lg:hidden" aria-label="Annuler"><X className="size-5" /></button>
+                </div>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {catalog.services.map((s) => {
                     const p = priceOf(pickedItem, s.id);
                     if (p === undefined) return null;
                     return (
                       <button key={s.id} type="button" onClick={() => addLine(pickedItem, s.id)}
-                        className="flex min-h-14 items-center justify-between gap-2 rounded-md border border-line-2 bg-surface px-3.5 py-2 text-left transition hover:border-brand hover:ring-3 hover:ring-brand/10">
+                        className="flex min-h-[3.25rem] items-center justify-between gap-2 rounded-md border border-line-2 bg-surface px-3.5 py-2 text-left transition hover:border-brand hover:ring-3 hover:ring-brand/10">
                         <span className="text-[14.5px] font-medium leading-tight">{s.name}</span>
                         <Money value={p} unit={false} className="text-sm font-semibold text-brand" />
                       </button>
@@ -176,6 +184,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
                   })}
                 </div>
               </div>
+              </>
             )}
           </section>
         </div>
@@ -195,26 +204,28 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
                   const hasObs = !!(l.color || l.brand || l.observations);
                   return (
                     <li key={l.key} className="px-4 py-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-[14.5px] font-medium">{l.itemLabel}</p>
-                          <p className="text-[12.5px] text-ink-3">{l.serviceLabel} · <Money value={l.unitPrice} unit={false} /></p>
+                          <p className="truncate text-[15px] font-medium">{l.itemLabel}</p>
+                          <p className="text-[13px] text-ink-3">{l.serviceLabel} · <Money value={l.unitPrice} unit={false} /> l&apos;unité</p>
                         </div>
+                        <Money value={l.unitPrice * l.quantity} unit={false} className="pt-0.5 text-right text-[15px] font-semibold" />
+                      </div>
+                      <div className="mt-2 flex items-center gap-1">
                         <div className="flex items-center rounded-md border border-line-2">
-                          <button type="button" className="grid size-9 place-items-center text-ink-2 hover:bg-subtle disabled:opacity-40" aria-label="Moins"
+                          <button type="button" className="grid size-10 place-items-center text-ink-2 hover:bg-subtle disabled:opacity-40" aria-label="Moins"
                             disabled={l.quantity <= 1} onClick={() => updateLine(l.key, { quantity: l.quantity - 1 })}><Minus className="size-4" /></button>
-                          <span className="w-8 text-center text-[15px] font-semibold tnum">{l.quantity}</span>
-                          <button type="button" className="grid size-9 place-items-center text-ink-2 hover:bg-subtle" aria-label="Plus"
+                          <span className="w-9 text-center text-[15px] font-semibold tnum">{l.quantity}</span>
+                          <button type="button" className="grid size-10 place-items-center text-ink-2 hover:bg-subtle" aria-label="Plus"
                             onClick={() => updateLine(l.key, { quantity: Math.min(999, l.quantity + 1) })}><Plus className="size-4" /></button>
                         </div>
-                        <Money value={l.unitPrice * l.quantity} unit={false} className="w-16 text-right text-[14.5px] font-semibold" />
-                        <button type="button" onClick={() => updateLine(l.key, { open: !l.open })} aria-label="Observations"
-                          className={cn("relative grid size-9 place-items-center rounded-md hover:bg-subtle", l.open ? "text-brand" : "text-ink-3")}>
-                          <MessageSquareText className="size-[18px]" />
-                          {hasObs && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-warning ring-2 ring-surface" />}
+                        <button type="button" onClick={() => updateLine(l.key, { open: !l.open })} aria-label="Observations" aria-expanded={l.open}
+                          className={cn("relative ml-auto flex h-10 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium hover:bg-subtle", l.open ? "text-brand" : "text-ink-3")}>
+                          <MessageSquareText className="size-[18px]" /><span className="hidden min-[360px]:inline">Détails</span>
+                          {hasObs && <span className="absolute right-1 top-1.5 size-2 rounded-full bg-warning ring-2 ring-surface" />}
                         </button>
                         <button type="button" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} aria-label="Retirer la ligne"
-                          className="grid size-9 place-items-center rounded-md text-ink-3 hover:bg-danger-50 hover:text-danger">
+                          className="grid size-10 place-items-center rounded-md text-ink-3 hover:bg-danger-50 hover:text-danger">
                           <Trash2 className="size-[18px]" />
                         </button>
                       </div>
@@ -233,7 +244,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
             )}
           </section>
 
-          <section className={cn(vis("options"), "rounded-lg border border-line bg-surface p-5 shadow-card")}>
+          <section className={cn(vis("options"), "rounded-lg border border-line bg-surface p-4 shadow-card sm:p-5")}>
             <StepTitle n={3} title="Options" />
             <div className="space-y-4">
               <button type="button" onClick={() => { setIsExpress(!isExpress); setDueEdited(null); }}
@@ -321,13 +332,13 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
       </div>
 
       {/* Barre collante (téléphone) */}
-      <div className="no-print fixed inset-x-0 bottom-16 z-30 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur-md lg:hidden">
+      <div className="no-print fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md lg:hidden">
         <div className="flex items-center gap-3">
           {stepIndex > 0 && (
             <Button type="button" variant="secondary" size="icon" onClick={() => setStep(STEPS[stepIndex - 1])} aria-label="Étape précédente"><ArrowLeft /></Button>
           )}
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] text-ink-3">Total</p>
+            <p className="text-[12px] text-ink-3">Total{pieces > 0 && ` · ${pieces} pièce${pieces > 1 ? "s" : ""}`}</p>
             <Money value={totals.total} className="text-lg font-semibold" />
           </div>
           {step === "paiement" ? (
@@ -358,12 +369,12 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 function ItemGrid({ items, picked, onPick, lines }: { items: { id: string; name: string }[]; picked: string | null; onPick: (id: string) => void; lines: Line[] }) {
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+    <div className="grid grid-cols-3 gap-2 xl:grid-cols-4">
       {items.map((i) => {
         const count = lines.filter((l) => l.itemTypeId === i.id).reduce((s, l) => s + l.quantity, 0);
         return (
           <button key={i.id} type="button" onClick={() => onPick(i.id)}
-            className={cn("relative flex min-h-16 items-center justify-center rounded-lg border px-3 py-3 text-center text-[14.5px] font-medium leading-tight transition",
+            className={cn("relative flex min-h-14 items-center justify-center rounded-lg border px-2 py-2.5 text-center text-[14px] sm:min-h-16 sm:px-3 sm:text-[14.5px] font-medium leading-tight transition",
               picked === i.id ? "border-brand bg-brand-50 text-brand ring-3 ring-brand/12" : "border-line-2 bg-surface hover:border-ink-3/40 hover:bg-canvas")}>
             {i.name}
             {count > 0 && <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-brand px-1 text-[11px] font-semibold text-white tnum">{count}</span>}

@@ -57,6 +57,8 @@ function ShellInner({ user, shopName, children }: { user: ShellUser; shopName: s
     return () => document.removeEventListener("keydown", onKey);
   }, [menuOpen]);
   const items = NAV.filter((n) => !n.admin || user.role === "ADMIN");
+  // Saisie d'un dépôt : le formulaire a sa propre barre d'action, on masque la navigation du bas (téléphone).
+  const focusMode = path.startsWith("/depot/nouveau");
 
   async function logout() {
     setLoggingOut(true);
@@ -130,7 +132,7 @@ function ShellInner({ user, shopName, children }: { user: ShellUser; shopName: s
           <Plus className="size-5" /> Dépôt
         </Link>
       )}
-      <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
+      {!focusMode && <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
         {MOBILE.map((item) => {
           const active = !menuOpen && isActive(item, path);
           const Icon = item.icon;
@@ -146,7 +148,7 @@ function ShellInner({ user, shopName, children }: { user: ShellUser; shopName: s
           {menuOpen ? <X className="size-[22px]" /> : <Menu className="size-[22px]" />}
           Menu
         </button>
-      </nav>
+      </nav>}
 
       {/* Menu complet (téléphone) */}
       {menuOpen && (

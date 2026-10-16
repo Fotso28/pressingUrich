@@ -2,8 +2,10 @@
  * Jeu de données de démonstration réaliste (à lancer après `pnpm db:seed`).
  *
  *  - Période : de DEMO_START (défaut 2025-11-01) à aujourd'hui.
- *  - Charges mensuelles : loyer 75 000, eau 15 000, salaires 75 000 + 45 000 (versés aux comptes
- *    des agents), intrants 30 000–50 000, TV Canal+ 5 000, électricité 30 000–50 000, autres 10 000–30 000.
+ *  - Charges : loyer 75 000 / mois payé par trimestre (225 000 tous les 3 mois), eau 15 000,
+ *    salaires 75 000 + 45 000 (versés aux comptes des agents), intrants 30 000–50 000, TV Canal+ 5 000,
+ *    électricité 30 000–50 000, autres 10 000–30 000. Le mois en cours n'a pas encore réglé eau,
+ *    électricité ni salaires (payés en fin de mois).
  *  - Bénéfice de chaque mois complet entre 310 000 et 440 000 FCFA (le CA encaissé en découle).
  *  - Tous les montants sont des multiples de 100 FCFA, le plus souvent de 500.
  *  - Clients aux noms camerounais ; 70 % sont des habitués qui reviennent régulièrement.
@@ -30,9 +32,10 @@ import { normalizeName, normalizePhone } from "../src/lib/domain/normalize";
 
 const TZ = "Africa/Douala";
 const START = process.env.DEMO_START ?? "2025-11-01";
-const DEMO_VERSION = "2";
+const DEMO_VERSION = "3";
 // Charges fixes mensuelles (FCFA)
 const RENT = 75_000, WATER = 15_000, TV = 5_000;
+const RENT_EVERY = 3; // loyer payé par trimestre, le premier mois du trimestre
 const SALARIES = [75_000, 45_000]; // agent 1, agent 2
 // Bénéfice visé par mois complet : tiré dans [PROFIT_MIN + marge, PROFIT_MAX − marge].
 const PROFIT_MIN = 310_000, PROFIT_MAX = 440_000;
@@ -173,14 +176,17 @@ async function main() {
       cashIntrants: roundTo(intrants * (0.25 + rnd() * 0.2)), cashOther: roundTo(Math.min(8_000, other * (0.25 + rnd() * 0.2))),
     });
   }
-  const monthCharges = (b: Budget) => RENT + WATER + TV + SALARIES[0] + SALARIES[1] + b.electricity + b.intrants + b.other;
+  const rentOf = (mo: (typeof months)[number]) => (months.indexOf(mo) % RENT_EVERY === 0 ? RENT * RENT_EVERY : 0);
+  const monthCharges = (b: Budget, mo: (typeof months)[number]) => rentOf(mo) + WATER + TV + SALARIES[0] + SALARIES[1] + b.electricity + b.intrants + b.other;
   // Légère compensation : une partie des dépôts de fin de mois est encaissée le mois suivant ou reste impayée.
-  for (const mo of full) { const b = budgets.get(mo.key)!; mo.target = roundTo((monthCharges(b) + b.profit) * 1.016, 1000); }
+  for (const mo of full) { const b = budgets.get(mo.key)!; mo.target = roundTo((monthCharges(b, mo) + b.profit) * 1.016, 1000); }
   for (const mo of months) if (!mo.target) {
     // Mois en cours : objectif proratisé sur les jours ouvrés écoulés.
     const b = budgets.get(mo.key)!;
     const totalOpen = Array.from({ length: mo.days }, (_, i) => i + 1).filter((d) => local(at(mo.y, mo.m, d, 12, 0)).getDay() !== 0).length;
-    mo.target = roundTo(((monthCharges(b) + b.profit) * mo.openDays.length) / totalOpen, 1000);
+    // Le mois en cours ne règle pas encore eau, électricité ni salaires.
+    const charges = rentOf(mo) + TV + b.intrants + b.other;
+    mo.target = roundTo(((charges + b.profit) * mo.openDays.length) / totalOpen, 1000);
   }
 
   // Clients : 70 % d'habitués
@@ -249,7 +255,8 @@ async function main() {
       const dayBudget = (mo.target - (monthAccum.get(mo.key) ?? 0)) / remainingDays * (0.75 + rnd() * 0.5);
       let dayTotal = 0;
       const dayOrders: { when: Date }[] = [];
-      while (dayTotal < dayBudget) {
+      // Au moins 3 dépôts par jour ouvré : un comptoir n'est jamais vide.
+      while (dayTotal < dayBudget || dayOrders.length < 3) {
         const when = at(mo.y, mo.m, d, int(7, 18), int(0, 59));
         if (when > now) break;
         // Choix du client : habitués pondérés par fréquence, occasionnels ~6 % des dépôts.
@@ -286,11 +293,18 @@ async function main() {
         const id = randomUUID();
         const dueAt = addH(when, isExpress ? 24 : 48);
         const startedAt = shopHours(addH(when, 1 + rnd() * 8));
-        const late = chance(0.05);
-        const readyAt = shopHours(late ? addH(dueAt, 4 + rnd() * 30) : addH(dueAt, -(1 + rnd() * 10)));
+        // Charge de travail visible à l'ouverture de l'appli : les dépôts des derniers jours sont plus souvent
+        // en retard ou pas encore retirés (écrans « À traiter », « En retard », « Prêtes »).
+        const recent = now.getTime() - when.getTime() < 4 * 86_400_000;
+        const late = chance(recent ? 0.3 : 0.05);
+        // Quelques dépôts d'il y a 3 à 6 jours sont encore à l'atelier : ils apparaissent « En retard ».
+        const ageDays = (now.getTime() - when.getTime()) / 86_400_000;
+        const backlog = ageDays > 3 && ageDays < 6 && chance(0.3);
+        const readyAt = backlog ? addH(now, 6 + rnd() * 40)
+          : shopHours(late ? addH(dueAt, 4 + rnd() * 30) : addH(dueAt, -(1 + rnd() * 10)));
         const abandoned = chance(0.009);
         const cancelled = !abandoned && chance(0.008);
-        const pickupDelayDays = c.regular ? 0.2 + rnd() * rnd() * 9 : 0.5 + rnd() * 14;
+        const pickupDelayDays = recent && chance(0.5) ? 2 + rnd() * 6 : c.regular ? 0.2 + rnd() * rnd() * 9 : 0.5 + rnd() * 14;
         const collectedAt = shopHours(addH(readyAt, pickupDelayDays * 24));
         const deposit = cancelled ? 0 : chance(0.36) ? total : chance(0.45) ? Math.min(total, Math.round((total * (0.3 + rnd() * 0.4)) / 500) * 500) : 0;
         const agent = worker(when);
@@ -398,14 +412,21 @@ async function main() {
     // Intrants : le gros achat du mois au grossiste complète les achats faits à la caisse.
     const bigIntrants = b.intrants - cash.intrants;
     out(3, "INTRANTS", pick(["Lessive (carton), Javel et détachant", "Lessive (carton), amidon et cintres", "Produits de lavage et housses"]), bigIntrants, "ESPECES", "Grossiste Marché Central");
-    out(5, "LOYER", "Loyer du local", RENT, "ORANGE_MONEY", "M. Ndoumbe (bailleur)");
+    if (rentOf(mo)) {
+      const q = months.slice(months.indexOf(mo), months.indexOf(mo) + RENT_EVERY).map((x) => x.key);
+      const ml = (k: string) => `${["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."][Number(k.slice(5)) - 1]} ${k.slice(0, 4)}`;
+      out(5, "LOYER", `Loyer du trimestre (${ml(q[0])} → ${ml(q[q.length - 1])})`, rentOf(mo), "ORANGE_MONEY", "M. Ndoumbe (bailleur)");
+    }
     out(8, "ABONNEMENTS", "Abonnement TV Canal+", TV, "MTN_MOMO", "Canal+");
-    out(12, "ELECTRICITE", "Facture ENEO (électricité)", b.electricity, "MTN_MOMO", "ENEO");
-    out(14, "EAU", "Facture CAMWATER (eau)", WATER, "MTN_MOMO", "CAMWATER");
+    if (isComplete) {
+      // Factures du mois réglées en fin de mois (le mois en cours ne les a pas encore payées).
+      out(lastDay - 2, "ELECTRICITE", "Facture ENEO (électricité)", b.electricity, "MTN_MOMO", "ENEO");
+      out(lastDay - 1, "EAU", "Facture CAMWATER (eau)", WATER, "MTN_MOMO", "CAMWATER");
+    }
     if (isComplete) {
       // Autres dépenses : ajustées pour que le bénéfice tombe sur la cible, dans [10 000, 30 000].
       const sales = byMonth.get(mo.key) ?? 0;
-      const fixed = RENT + WATER + TV + SALARIES[0] + SALARIES[1] + b.electricity + b.intrants;
+      const fixed = rentOf(mo) + WATER + TV + SALARIES[0] + SALARIES[1] + b.electricity + b.intrants;
       const other = Math.min(30_000, Math.max(10_000, roundTo(sales - fixed - b.profit)));
       out(20, "AUTRE", pick(["Réparation fer à repasser", "Recharge gaz et divers", "Fournitures et petit matériel", "Réparation machine à laver"]), Math.max(500, other - cash.other), "ESPECES", pick(["Technicien Akwa", "Quincaillerie Ndokoti", null]));
       agents.forEach((a, i) => out(lastDay, "SALAIRES", `Salaire ${a.name}`, SALARIES[i], "MTN_MOMO", a.name, { beneficiaryUserId: a.id, salaryPeriod: mo.key }));
