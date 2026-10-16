@@ -24,7 +24,7 @@ import { cn } from "@/lib/cn";
 type OrderLite = {
   id: string; number: number; status: OrderStatus; total: number; amountPaid: number; isExpress: boolean; dueAt: string; notes: string;
   discountType: "MONTANT" | "POURCENT" | null; discountValue: number;
-  items: { id: string; label: string; quantity: number; color: string; brand: string; observations: string }[];
+  items: { id: string; kind: string; label: string; quantity: number; description: string; color: string; brand: string; observations: string }[];
 };
 
 export function OrderActions({ order, isAdmin, hasOpenSession, cancelReason }: { order: OrderLite; isAdmin: boolean; hasOpenSession: boolean; cancelReason: string | null }) {
@@ -216,7 +216,7 @@ function EditDialog({ order, onClose, onDone }: { order: OrderLite; onClose: () 
           exec(() => updateOrder({
             orderId: order.id, isExpress, dueAt: dueDate.toISOString(),
             discount: discountValue ? { type: discountType, value: discountValue } : null, notes,
-            lines: items.map(({ id, quantity, color, brand, observations }) => ({ id, quantity, color, brand, observations })),
+            lines: items.map(({ id, quantity, description, color, brand, observations }) => ({ id, quantity, description, color, brand, observations })),
           }), { success: "Commande modifiée.", onSuccess: onDone });
         }}>
           <div className="space-y-3">
@@ -224,8 +224,9 @@ function EditDialog({ order, onClose, onDone }: { order: OrderLite; onClose: () 
               <div key={i.id} className="rounded-lg border border-line p-3">
                 <div className="flex items-center justify-between gap-3">
                   <p className="font-medium">{i.label}</p>
-                  <Input type="number" min={1} max={999} value={i.quantity} onChange={(e) => upd(i.id, { quantity: Math.max(1, parseInt(e.target.value || "1", 10)) })} className="h-9 w-20 text-center tnum" aria-label="Quantité" />
+                  {i.kind === "PIECE" && <Input type="number" min={1} max={999} value={i.quantity} onChange={(e) => upd(i.id, { quantity: Math.max(1, parseInt(e.target.value || "1", 10)) })} className="h-9 w-20 text-center tnum" aria-label="Quantité" />}
                 </div>
+                {i.kind !== "FORFAIT" && <Input value={i.description} onChange={(e) => upd(i.id, { description: e.target.value.slice(0, 120) })} placeholder="Description" className="mt-2 h-9" aria-label="Description" />}
                 <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <Input value={i.color} onChange={(e) => upd(i.id, { color: e.target.value })} placeholder="Couleur" className="h-9" />
                   <Input value={i.brand} onChange={(e) => upd(i.id, { brand: e.target.value })} placeholder="Marque" className="h-9" />

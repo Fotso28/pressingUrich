@@ -1,13 +1,14 @@
 import "server-only";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { formatAmount } from "@/lib/domain/money";
 import { db, type Tx } from "../db";
 import {
-  cashSessionCounts, cashSessions, customers, expenses, itemTypes, offlineOps, orderItems, orderStatusHistory, orders, payments, prices,
-  reservedNumbers, services,
+  cashSessionCounts, cashSessions, customers, expenses, offlineOps, orderItems, orderStatusHistory, orders, payments,
+  reservedNumbers,
 } from "../db/schema";
 import { DomainError, pgCode } from "../action-utils";
+import { itemRows, orderLineSchema, recordMoves, resolveLines } from "../orders/lines";
 import { getSettings } from "../queries/settings";
 import { computeCashExpected, EXPENSE_CATEGORIES, METHODS, type Method } from "@/lib/domain/cash";
 import { computeOrderTotals } from "@/lib/domain/totals";
@@ -26,7 +27,7 @@ const opSchema = z.discriminatedUnion("type", [
   z.object({
     ...base, type: z.literal("CREATE_ORDER"), id: z.uuid(), number: z.number().int().positive(), customerId: z.uuid(), isExpress: z.boolean(),
     dueAt: z.iso.datetime(), notes: text,
-    lines: z.array(z.object({ itemTypeId: z.uuid(), serviceId: z.uuid(), quantity: z.number().int().min(1).max(999), color: text, brand: text, observations: text })).min(1).max(100),
+    lines: z.array(orderLineSchema).min(1).max(100),
     deposit: z.object({ paymentId: z.uuid(), sessionId: z.uuid(), amount: amount.min(1), method, reference: text }).nullable(),
   }),
   z.object({ ...base, type: z.literal("ADD_PAYMENT"), paymentId: z.uuid(), orderId: z.uuid(), sessionId: z.uuid(), amount: amount.min(1), method, reference: text }),
@@ -78,13 +79,7 @@ async function apply(tx: Tx, u: Snapshot["user"], op: z.infer<typeof opSchema>):
     }
     case "CREATE_ORDER": {
       const settings = await getSettings();
-      const pairs = await tx.select({ itemTypeId: prices.itemTypeId, serviceId: prices.serviceId, amount: prices.amount, itemLabel: itemTypes.name, serviceLabel: services.shortName })
-        .from(prices).innerJoin(itemTypes, eq(itemTypes.id, prices.itemTypeId)).innerJoin(services, eq(services.id, prices.serviceId))
-        .where(and(eq(prices.active, true), eq(itemTypes.active, true), eq(services.active, true), inArray(prices.itemTypeId, op.lines.map((l) => l.itemTypeId))));
-      const lines = op.lines.map((l, i) => {
-        const p = pairs.find((x) => x.itemTypeId === l.itemTypeId && x.serviceId === l.serviceId) ?? fail(`Ligne ${i + 1} : article ou service retiré du catalogue.`);
-        return { ...l, unitPrice: p.amount, itemLabel: p.itemLabel, serviceLabel: p.serviceLabel, lineNo: i + 1 };
-      });
+      const { lines, moves } = await resolveLines(tx, op.customerId, op.lines, settings.kiloPrice);
       const expressRatePct = op.isExpress ? settings.expressRatePct : 0;
       const totals = computeOrderTotals(lines, { isExpress: op.isExpress, expressRatePct, discount: null });
       if (op.deposit && op.deposit.amount > totals.total) fail("L'acompte dépasse le total.");
@@ -100,10 +95,8 @@ async function apply(tx: Tx, u: Snapshot["user"], op: z.infer<typeof opSchema>):
         total: totals.total, amountPaid: op.deposit?.amount ?? 0, dueAt: new Date(op.dueAt), notes: op.notes,
         idempotencyKey: op.opId, createdBy: u.id, createdAt: at, updatedAt: at,
       });
-      await tx.insert(orderItems).values(lines.map((l) => ({
-        orderId: op.id, lineNo: l.lineNo, itemTypeId: l.itemTypeId, serviceId: l.serviceId, itemLabel: l.itemLabel, serviceLabel: l.serviceLabel,
-        unitPrice: l.unitPrice, quantity: l.quantity, lineTotal: l.unitPrice * l.quantity, color: l.color, brand: l.brand, observations: l.observations,
-      })));
+      await tx.insert(orderItems).values(itemRows(op.id, lines));
+      await recordMoves(tx, op.customerId, op.id, u.id, moves, at);
       await tx.insert(orderStatusHistory).values({ orderId: op.id, fromStatus: null, toStatus: "DEPOSEE", changedBy: u.id, changedAt: at, reason: "Saisi hors ligne" });
       if (op.deposit && sessionId) {
         await tx.insert(payments).values({

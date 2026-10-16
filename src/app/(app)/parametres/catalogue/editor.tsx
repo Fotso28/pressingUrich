@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
 
 type Item = { id: string; name: string; isFrequent: boolean; sortOrder: number; active: boolean };
 type Service = { id: string; name: string; shortName: string; active: boolean };
-type Price = { itemTypeId: string; serviceId: string; amount: number; active: boolean };
+type Price = { itemTypeId: string; serviceId: string; amount: number; maxAmount: number | null; active: boolean };
 
 export function CatalogEditor({ items, services, prices }: { items: Item[]; services: Service[]; prices: Price[] }) {
   const router = useRouter();
@@ -46,7 +46,7 @@ export function CatalogEditor({ items, services, prices }: { items: Item[]; serv
                   <div className="min-w-0 flex-1">
                     <p className={cn("flex items-center gap-1.5 font-medium", !i.active && "line-through")}>{i.isFrequent && <Star className="size-3.5 fill-warning text-warning" aria-label="Fréquent" />}{i.name}</p>
                     <p className="mt-0.5 flex flex-wrap gap-x-3 text-[13px] text-ink-3">
-                      {ip.length ? ip.map(({ s, p }) => <span key={s.id}>{s.shortName} <Money value={p!.amount} unit={false} /></span>) : "Aucun tarif"}
+                      {ip.length ? ip.map(({ s, p }) => <span key={s.id}>{s.shortName} <Money value={p!.amount} unit={false} />{p!.maxAmount != null && <> – <Money value={p!.maxAmount} unit={false} /></>}</span>) : "Aucun tarif"}
                     </p>
                   </div>
                   <ChevronRight className="size-4 shrink-0 text-ink-3" />
@@ -89,14 +89,19 @@ export function CatalogEditor({ items, services, prices }: { items: Item[]; serv
                   </td>
                   {visibleServices.map((s) => {
                     const p = prices.find((x) => x.itemTypeId === i.id && x.serviceId === s.id);
-                    return <td key={s.id} className="px-2 py-1.5 text-right"><PriceCell itemTypeId={i.id} serviceId={s.id} initial={p?.active ? p.amount : null} onSaved={refresh} /></td>;
+                    return (
+                      <td key={s.id} className="px-2 py-1.5 text-right">
+                        <PriceCell itemTypeId={i.id} serviceId={s.id} initial={p?.active ? p.amount : null} onSaved={refresh} />
+                        {p?.active && p.maxAmount != null && <button onClick={() => setEditItem(i)} className="block w-full px-2 text-right text-[12px] text-ink-3 tnum">jusqu&apos;à <Money value={p.maxAmount} unit={false} /></button>}
+                      </td>
+                    );
                   })}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="border-t border-line px-5 py-3 text-[13px] text-ink-3">Prix en multiples de 100 FCFA, enregistrés à la sortie du champ. Un changement de tarif n&apos;affecte pas les commandes existantes.</p>
+        <p className="border-t border-line px-5 py-3 text-[13px] text-ink-3">Prix en multiples de 100 FCFA, enregistrés à la sortie du champ. Prix variable (ex. 1 000 à 2 000) : ouvrez l&apos;article et renseignez « jusqu&apos;à ». Un changement de tarif n&apos;affecte pas les commandes existantes.</p>
       </Card>
 
       {editItem && <ItemDialog item={editItem === "new" ? null : editItem} nextOrder={items.length} services={services.filter((x) => x.active)} prices={prices} onClose={() => setEditItem(null)} onDone={() => { setEditItem(null); refresh(); }} />}
@@ -153,14 +158,20 @@ function ItemDialog({ item, nextOrder, services, prices, onClose, onDone }: { it
       const p = item && prices.find((x) => x.itemTypeId === item.id && x.serviceId === s.id && x.active);
       return [s.id, p ? p.amount : null];
     })));
+  const [maxes, setMaxes] = useState<Record<string, number | null>>(() =>
+    Object.fromEntries(services.map((s) => {
+      const p = item && prices.find((x) => x.itemTypeId === item.id && x.serviceId === s.id && x.active);
+      return [s.id, p?.maxAmount ?? null];
+    })));
   const { exec, pending } = useAction();
-  const invalid = Object.values(amounts).some((a) => a !== null && (a < 100 || a % 100 !== 0));
+  const badMax = (id: string) => maxes[id] != null && (amounts[id] == null || maxes[id]! <= amounts[id]! || maxes[id]! % 100 !== 0);
+  const invalid = Object.values(amounts).some((a) => a !== null && (a < 100 || a % 100 !== 0)) || services.some((s) => badMax(s.id));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent title={item ? "Modifier l'article" : "Nouvel article"} description="Nom, tarifs par service et affichage au dépôt.">
         <form className="space-y-4" onSubmit={(e) => {
           e.preventDefault();
-          exec(() => saveItem({ ...f, id: item?.id, prices: services.map((s) => ({ serviceId: s.id, amount: amounts[s.id] ?? null })) }),
+          exec(() => saveItem({ ...f, id: item?.id, prices: services.map((s) => ({ serviceId: s.id, amount: amounts[s.id] ?? null, maxAmount: amounts[s.id] != null ? (maxes[s.id] ?? null) : null })) }),
             { success: item ? "Article modifié." : "Article créé.", onSuccess: onDone });
         }}>
           <Field label="Nom"><Input autoFocus required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="ex. Chemise" /></Field>
@@ -168,8 +179,12 @@ function ItemDialog({ item, nextOrder, services, prices, onClose, onDone }: { it
             <legend className="px-1 text-sm font-medium text-ink-2">Tarifs</legend>
             {services.length === 0 && <p className="text-sm text-ink-3">Créez d&apos;abord un service (ex. Lavage + repassage).</p>}
             {services.map((s) => (
-              <Field key={s.id} label={s.name} hint={amounts[s.id] === null ? "Laisser vide si le service n'est pas proposé pour cet article." : amounts[s.id]! % 100 !== 0 ? "Multiple de 100 FCFA." : undefined}>
-                <AmountInput value={amounts[s.id]} onChange={(v) => setAmounts({ ...amounts, [s.id]: v })} placeholder="—" />
+              <Field key={s.id} label={s.name} error={badMax(s.id) ? "Le prix maximal doit dépasser le prix (multiple de 100)." : undefined}
+                hint={amounts[s.id] === null ? "Laisser vide si le service n'est pas proposé pour cet article." : amounts[s.id]! % 100 !== 0 ? "Multiple de 100 FCFA." : "Prix variable : renseignez « jusqu'à », le prix se choisit au dépôt."}>
+                <div className="grid grid-cols-2 gap-2">
+                  <AmountInput value={amounts[s.id]} onChange={(v) => setAmounts({ ...amounts, [s.id]: v })} placeholder="—" aria-label={`Prix ${s.name}`} />
+                  <AmountInput value={maxes[s.id]} onChange={(v) => setMaxes({ ...maxes, [s.id]: v })} placeholder="jusqu'à (facultatif)" aria-label={`Prix maximal ${s.name}`} disabled={amounts[s.id] == null} />
+                </div>
               </Field>
             ))}
           </fieldset>

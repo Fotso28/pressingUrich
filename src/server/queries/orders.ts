@@ -34,8 +34,8 @@ export async function listOrders(f: OrderFilters) {
   const statuses = TAB_STATUSES[f.tab];
   const where = filterWhere({ ...f, statuses });
   const page = Math.max(1, f.page ?? 1);
-  const order = f.tab === "a-traiter" || f.tab === "pretes"
-    ? [asc(orders.dueAt)] : [desc(orders.createdAt)];
+  // Toutes les listes : la dernière commande enregistrée en tête.
+  const order = [desc(orders.createdAt)];
   const [rows, [{ total }]] = await Promise.all([
     db.select({
       id: orders.id, number: orders.number, status: orders.status, total: orders.total, amountPaid: orders.amountPaid,
@@ -49,8 +49,9 @@ export async function listOrders(f: OrderFilters) {
 }
 export type OrderRow = Awaited<ReturnType<typeof listOrders>>["rows"][number];
 
-export async function countByTab(): Promise<Record<OrdersTab, number>> {
-  const rows = await db.select({ status: orders.status, n: count() }).from(orders).groupBy(orders.status);
+/** Nombre de commandes par onglet, avec les mêmes filtres que la liste (période, client, retard, impayé). */
+export async function countByTab(f: Omit<OrderFilters, "tab" | "page"> = {}): Promise<Record<OrdersTab, number>> {
+  const rows = await db.select({ status: orders.status, n: count() }).from(orders).where(filterWhere({ ...f, statuses: null })).groupBy(orders.status);
   const by = (s: OrderStatus[]) => rows.filter((r) => s.includes(r.status)).reduce((a, r) => a + r.n, 0);
   return {
     "a-traiter": by(["DEPOSEE", "EN_TRAITEMENT"]), pretes: by(["PRETE"]), retirees: by(["RETIREE"]),

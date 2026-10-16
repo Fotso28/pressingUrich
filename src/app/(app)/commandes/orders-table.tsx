@@ -10,6 +10,8 @@ import { FlagDot, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/card";
 import { SaveButton } from "@/components/save-button";
 import { Money } from "@/components/money";
+import { WhatsAppButton } from "@/components/whatsapp-button";
+import { readyMessage } from "@/lib/domain/whatsapp";
 import { formatOrderNumber } from "@/lib/domain/order-number";
 import { formatDate } from "@/lib/domain/dates";
 import { formatPhone } from "@/lib/domain/normalize";
@@ -17,7 +19,7 @@ import { NEXT_STEP_LABEL, isAbandoned, isLate, nextWorkshopStatus } from "@/lib/
 import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/cn";
 
-export function OrdersTable({ rows, abandonedAfterDays }: { rows: OrderRow[]; tab: OrdersTab; abandonedAfterDays: number; isAdmin: boolean }) {
+export function OrdersTable({ rows, abandonedAfterDays, shopName }: { rows: OrderRow[]; tab: OrdersTab; abandonedAfterDays: number; isAdmin: boolean; shopName: string }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -53,7 +55,13 @@ export function OrdersTable({ rows, abandonedAfterDays }: { rows: OrderRow[]; ta
         </SaveButton>
       );
     }
-    if (r.status === "PRETE") return <Link href={`/commandes/${r.id}`} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-sm font-medium text-white hover:bg-brand-600">Retrait</Link>;
+    if (r.status === "PRETE") return (
+      <span className="inline-flex items-center gap-2">
+        <WhatsAppButton size="icon" label={`Prévenir ${r.customerName} sur WhatsApp`} phone={r.customerPhone}
+          text={readyMessage({ shopName, customerName: r.customerName, number: formatOrderNumber(r.number), total: r.total, amountPaid: r.amountPaid, items: [] })} />
+        <Link href={`/commandes/${r.id}`} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-sm font-medium text-white hover:bg-brand-600">Retrait</Link>
+      </span>
+    );
     return null;
   };
 

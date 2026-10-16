@@ -43,8 +43,8 @@ test("mode hors ligne : l'app s'ouvre sans réseau, dépôt enregistré puis syn
   await page.getByRole("dialog").getByLabel("Nom complet").fill("Client Hors Ligne");
   await page.getByRole("dialog").getByLabel("Téléphone").fill(phone);
   await page.getByRole("dialog").getByRole("button", { name: "Créer le client" }).click();
-  await page.getByRole("button", { name: "Chemise", exact: true }).first().click();
-  await page.getByRole("button", { name: /Lavage \+ repassage/ }).first().click();
+  await page.getByRole("button", { name: "Chemise simple", exact: true }).first().click(); // un seul service : ajout direct
+  await page.getByLabel("Description de Chemise simple").fill("col blanc");
   await page.getByLabel("Acompte").fill("500");
   await page.getByRole("button", { name: /Valider le dépôt/ }).click();
   const confirm = page.getByText(/Dépôt enregistré · Ticket n°/);

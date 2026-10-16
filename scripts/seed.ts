@@ -12,28 +12,60 @@ import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import { Pool as PgPool } from "pg";
 import ws from "ws";
-import { eq } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import * as s from "../src/server/db/schema";
 
 const ITEMS: [string, boolean, number, number, number][] = [
-  // nom, fréquent, Lav+Rep, Rep, Sec (0 = non proposé)
-  ["Chemise", true, 1000, 500, 1500],
+  // nom, fréquent, Lav+Rep, Rep, Sec (0 = non proposé) — articles hors de la grille officielle (voir CATALOG_V2)
   ["Pantalon", true, 1000, 500, 1500],
   ["Tee-shirt", true, 700, 300, 0],
   ["Robe", true, 1500, 700, 2500],
-  ["Jupe", true, 1000, 500, 1500],
-  ["Costume (2 pièces)", true, 0, 2000, 5000],
   ["Veste", true, 1500, 1000, 3000],
-  ["Boubou", true, 2000, 1000, 3000],
   ["Kaba", false, 1500, 700, 2500],
   ["Pull", false, 1500, 700, 2000],
   ["Manteau", false, 0, 1500, 5000],
-  ["Cravate", false, 0, 300, 1000],
-  ["Drap", true, 1500, 700, 0],
-  ["Couette", false, 5000, 0, 7000],
   ["Rideau", false, 3000, 1500, 4000],
 ];
+
+/**
+ * Grille de prix officielle de Continental Pressing Express (lavage + repassage), de « Blouson » à « Jupe ».
+ * [nom, fréquent, prix, prix maximal si le prix varie selon l'article]
+ */
+const CATALOG_V2: [string, boolean, number, number | null][] = [
+  ["Blouson et blouse", true, 1000, 2000],
+  ["Boubou simple (courte taille)", true, 800, 1000],
+  ["Boubou blanc (courte taille)", false, 1000, null],
+  ["Bermudas, caleçon et string", false, 500, null],
+  ["Chaussette", false, 500, null],
+  ["Chemise simple", true, 500, null],
+  ["Chemise blanche, pagne et djin", true, 1000, null],
+  ["Chemise police", false, 1000, null],
+  ["Costume enfant", false, 1500, null],
+  ["Costume enfant blanc", false, 1500, null],
+  ["Costume adulte", true, 2000, null],
+  ["Ensemble grand et enfant", false, 2500, 3000],
+  ["Couverture ou couvre-lit blanc", false, 4500, 5000],
+  ["Cravate, nœud papillon, ceinture, foulard", false, 700, null],
+  ["Culotte adulte", false, 1000, null],
+  ["Culotte adulte blanche", false, 500, null],
+  ["Culotte enfant", false, 600, null],
+  ["Culotte enfant blanche", false, 500, null],
+  ["Tennis et chaussure de couleur", false, 1500, 5000], // « à partir de 1 500 »
+  ["Tennis et chaussure blanche", false, 1000, null],
+  ["Drap simple", true, 1500, null],
+  ["Drap blanc", false, 2000, null],
+  ["Drap doublé", false, 2000, null],
+  ["Drap doublé blanc", false, 500, null],
+  ["Débardeur et singlette", false, 2000, null],
+  ["Gandoura dame (une pièce)", false, 2500, null],
+  ["Gandoura dame blanche (une pièce)", false, 2500, null],
+  ["Gandoura homme (trois pièces)", false, 4000, null],
+  ["Gandoura homme blanche (trois pièces)", false, 5000, 7000],
+  ["Jupe", true, 500, 8000],
+];
+/** Anciens articles remplacés par la grille officielle : désactivés (gardés pour l'historique des commandes). */
+const REPLACED_BY_V2 = ["Chemise", "Boubou", "Costume (2 pièces)", "Cravate", "Drap", "Couette"];
 const SERVICES: [string, string][] = [
   ["Lavage + repassage", "Lav+Rep"],
   ["Repassage seul", "Rep"],
@@ -102,6 +134,25 @@ async function main() {
     await d.insert(s.prices).values(rows);
     console.log(`Catalogue créé : ${items.length} articles × ${svc.length} services, ${rows.length} prix.`);
   } else console.log("Catalogue déjà présent.");
+
+  // 4. Grille de prix officielle (une seule fois : ensuite, le gérant la modifie dans Paramètres › Catalogue).
+  const [cv] = await d.select().from(s.appMeta).where(eq(s.appMeta.key, "catalog_version")).limit(1);
+  if (!cv || Number(cv.value) < 2) {
+    let [lr] = await d.select().from(s.services).where(eq(s.services.shortName, "Lav+Rep")).limit(1);
+    if (!lr) [lr] = await d.insert(s.services).values({ name: "Lavage + repassage", shortName: "Lav+Rep" }).returning();
+    await d.update(s.itemTypes).set({ active: false, isFrequent: false, updatedAt: new Date() }).where(inArray(s.itemTypes.name, REPLACED_BY_V2));
+    for (const [i, [name, isFrequent, amount, maxAmount]] of CATALOG_V2.entries()) {
+      const [it] = await d.insert(s.itemTypes).values({ name, isFrequent, sortOrder: i, active: true })
+        .onConflictDoUpdate({ target: s.itemTypes.name, set: { isFrequent, sortOrder: i, active: true, updatedAt: new Date() } }).returning();
+      await d.insert(s.prices).values({ itemTypeId: it.id, serviceId: lr.id, amount, maxAmount })
+        .onConflictDoUpdate({ target: [s.prices.itemTypeId, s.prices.serviceId], set: { amount, maxAmount, active: true, updatedAt: new Date() } });
+    }
+    // Les articles restants (hors grille) passent après la grille dans l'ordre d'affichage.
+    await d.execute(sql`update item_types set sort_order = sort_order + 100 where name not in (${sql.join(CATALOG_V2.map(([n]) => sql`${n}`), sql`, `)}) and sort_order < 100`);
+    await d.insert(s.appMeta).values({ key: "catalog_version", value: "2" })
+      .onConflictDoUpdate({ target: s.appMeta.key, set: { value: "2", updatedAt: new Date() } });
+    console.log(`Grille de prix officielle appliquée : ${CATALOG_V2.length} articles.`);
+  }
 
   await close();
 }

@@ -31,7 +31,7 @@ export async function getCashSessionSummary(id: string) {
 export async function listClosedSessions(limit = 60, onlyGaps = false) {
   const sessions = await db.select({ s: cashSessions, userName: user.name }).from(cashSessions)
     .leftJoin(user, eq(user.id, cashSessions.userId))
-    .where(eq(cashSessions.status, "FERMEE")).orderBy(desc(cashSessions.closedAt)).limit(onlyGaps ? 200 : limit);
+    .where(eq(cashSessions.status, "FERMEE")).orderBy(desc(cashSessions.openedAt)).limit(onlyGaps ? 200 : limit);
   if (!sessions.length) return [];
   const counts = await db.select().from(cashSessionCounts).where(inArray(cashSessionCounts.cashSessionId, sessions.map((x) => x.s.id)));
   const out = sessions.map(({ s, userName }) => {

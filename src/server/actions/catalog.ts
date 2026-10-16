@@ -49,8 +49,12 @@ export async function setPrice(raw: { itemTypeId: string; serviceId: string; amo
     if (input.amount === null) {
       await db.update(prices).set({ active: false, updatedAt: new Date() }).where(where);
     } else {
+      // Un prix maximal inférieur au nouveau prix n'a plus de sens : le prix redevient fixe.
       await db.insert(prices).values({ itemTypeId: input.itemTypeId, serviceId: input.serviceId, amount: input.amount })
-        .onConflictDoUpdate({ target: [prices.itemTypeId, prices.serviceId], set: { amount: input.amount, active: true, updatedAt: new Date() } });
+        .onConflictDoUpdate({ target: [prices.itemTypeId, prices.serviceId], set: {
+          amount: input.amount, active: true, updatedAt: new Date(),
+          maxAmount: sql`case when ${prices.maxAmount} > ${input.amount} then ${prices.maxAmount} else null end`,
+        } });
     }
     refresh();
     return undefined;
@@ -63,7 +67,8 @@ const itemSchema = z.object({
   isFrequent: z.boolean(),
   sortOrder: z.number().int().min(0).max(9999),
   active: z.boolean(),
-  prices: z.array(z.object({ serviceId: z.uuid(), amount: priceAmount.nullable() })).max(50),
+  prices: z.array(z.object({ serviceId: z.uuid(), amount: priceAmount.nullable(), maxAmount: priceAmount.nullish() })
+    .refine((p) => p.maxAmount == null || (p.amount !== null && p.maxAmount > p.amount), "Le prix maximal doit être supérieur au prix minimal.")).max(50),
 });
 
 /** Crée ou modifie un article avec ses tarifs par service, en une seule transaction. */
@@ -79,8 +84,8 @@ export async function saveItem(raw: z.input<typeof itemSchema>) {
         for (const p of list) {
           const where = and(eq(prices.itemTypeId, itemId!), eq(prices.serviceId, p.serviceId));
           if (p.amount === null) await tx.update(prices).set({ active: false, updatedAt: new Date() }).where(where);
-          else await tx.insert(prices).values({ itemTypeId: itemId!, serviceId: p.serviceId, amount: p.amount })
-            .onConflictDoUpdate({ target: [prices.itemTypeId, prices.serviceId], set: { amount: p.amount, active: true, updatedAt: new Date() } });
+          else await tx.insert(prices).values({ itemTypeId: itemId!, serviceId: p.serviceId, amount: p.amount, maxAmount: p.maxAmount ?? null })
+            .onConflictDoUpdate({ target: [prices.itemTypeId, prices.serviceId], set: { amount: p.amount, maxAmount: p.maxAmount ?? null, active: true, updatedAt: new Date() } });
         }
       });
     } catch (e) { uniqueName(e); }

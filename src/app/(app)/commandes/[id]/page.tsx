@@ -1,9 +1,10 @@
+import { formatKg } from "@/lib/domain/kilo";
 import { eq } from "drizzle-orm";
 import { db } from "@/server/db";
 import { orders } from "@/server/db/schema";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Zap } from "lucide-react";
+import { ArrowLeft, Scale, Zap } from "lucide-react";
 import { pageUser } from "@/server/session";
 import { getOrder } from "@/server/queries/orders";
 import { getSettings } from "@/server/queries/settings";
@@ -18,6 +19,8 @@ import { METHOD_LABEL } from "@/lib/domain/cash";
 import { ORDER_STATUS_LABEL, isAbandoned, isLate } from "@/lib/domain/status";
 import { OrderActions, VoidPaymentButton } from "./order-actions";
 import { cn } from "@/lib/cn";
+import { WhatsAppButton } from "@/components/whatsapp-button";
+import { depositMessage, readyMessage } from "@/lib/domain/whatsapp";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -37,6 +40,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const late = isLate(order);
   const abandoned = isAbandoned(order, settings.abandonedAfterDays);
   const isAdmin = user.role === "ADMIN";
+  const msg = { shopName: settings.shopName, customerName: o.customer.fullName, number: formatOrderNumber(order.number), total: order.total, amountPaid: order.amountPaid, dueAt: formatDateTime(order.dueAt), items: o.items };
 
   return (
     <div className="pb-28 lg:pb-0">
@@ -58,18 +62,27 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           </p>
           <p className="mt-1 text-sm text-ink-3 tnum">Déposée le {formatDateTime(order.createdAt)} par {o.createdByName ?? "—"} · prévue le <span className={cn(late && "font-medium text-danger")}>{formatDateTime(order.dueAt)}</span></p>
         </div>
+        {/* Prévenir le client : commande prête, ou récapitulatif du dépôt tant qu'elle est à l'atelier. */}
+        {order.status === "PRETE" ? <WhatsAppButton phone={o.customer.phone} text={readyMessage(msg)} label="Prévenir : commande prête" />
+          : order.status === "DEPOSEE" || order.status === "EN_TRAITEMENT" ? <WhatsAppButton phone={o.customer.phone} text={depositMessage(msg)} label="Envoyer le récapitulatif" className="bg-surface text-[#128C7E] ring-1 ring-inset ring-[#25D366]/50 hover:bg-[#25D366]/10" />
+          : null}
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
         <div className="space-y-6">
           <Card>
-            <CardHeader title="Articles" description={`${o.items.reduce((s, i) => s + i.quantity, 0)} pièce(s)`} />
+            <CardHeader title="Articles" description={[
+              `${o.items.reduce((s, i) => s + (i.kind === "PIECE" ? i.quantity : 0), 0)} pièce(s)`,
+              ...(o.items.some((i) => i.kind === "KILO") ? [formatKg(o.items.reduce((s, i) => s + (i.kind === "KILO" ? (i.weightGrams ?? 0) : 0), 0))] : []),
+            ].join(" · ")} />
             <ul className="divide-y divide-line border-t border-line">
               {o.items.map((i) => (
                 <li key={i.id} className="flex items-start gap-4 px-5 py-3.5">
-                  <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-subtle text-[13px] font-semibold tnum text-ink-2">{i.quantity}</span>
+                  <span className="mt-0.5 grid h-7 min-w-7 shrink-0 place-items-center rounded-md bg-subtle px-1.5 text-[13px] font-semibold tnum text-ink-2">{i.kind === "PIECE" ? i.quantity : <Scale className="size-3.5" />}</span>
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium">{i.itemLabel} <span className="font-normal text-ink-3">· {i.serviceLabel}</span></p>
+                    <p className="font-medium">{i.itemLabel}{i.kind === "KILO" && ` · ${formatKg(i.weightGrams ?? 0)}`} <span className="font-normal text-ink-3">· {i.serviceLabel}</span></p>
+                    {i.kind === "FORFAIT" && <p className="text-[13px] text-ink-3">+{formatKg(i.weightGrams ?? 0)} ajoutés au solde forfait du client</p>}
+                    {i.description && <p className="text-[14px] text-ink-2">{i.description}</p>}
                     {(i.color || i.brand) && <p className="text-[13px] text-ink-3">{[i.color, i.brand].filter(Boolean).join(" · ")}</p>}
                     {i.observations && <p className="mt-1 inline-block rounded bg-warning-50 px-2 py-0.5 text-[13px] text-[#8a5300]">{i.observations}</p>}
                   </div>
@@ -86,7 +99,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           <Card>
             <CardHeader title="Historique" />
             <ol className="relative border-t border-line px-5 py-4">
-              {o.history.map(({ h, by }, idx) => (
+              {[...o.history].reverse().map(({ h, by }, idx) => (
                 <li key={h.id} className="relative flex gap-3 pb-4 last:pb-0">
                   {idx < o.history.length - 1 && <span className="absolute left-[5px] top-4 h-full w-px bg-line" />}
                   <span className={cn("relative mt-1.5 size-[11px] shrink-0 rounded-full ring-4 ring-surface", h.toStatus === "ANNULEE" ? "bg-danger" : h.toStatus === "PRETE" ? "bg-success" : "bg-brand")} />
@@ -123,7 +136,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
               <div className="border-t border-line px-5 py-4">
                 <p className="eyebrow mb-2">Paiements</p>
                 <ul className="space-y-2.5">
-                  {o.payments.map(({ p, by, voidedByName }) => (
+                  {[...o.payments].reverse().map(({ p, by, voidedByName }) => (
                     <li key={p.id} className={cn("flex items-start justify-between gap-3 text-sm", p.voidedAt && "opacity-60")}>
                       <div>
                         <p className={cn("font-medium", p.voidedAt && "line-through")}>{METHOD_LABEL[p.method]}{p.reference && <span className="font-normal text-ink-3"> · {p.reference}</span>}</p>
@@ -146,7 +159,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
               id: order.id, number: order.number, status: order.status, total: order.total, amountPaid: order.amountPaid,
               isExpress: order.isExpress, dueAt: order.dueAt.toISOString(), notes: order.notes ?? "",
               discountType: order.discountType, discountValue: order.discountValue,
-              items: o.items.map((i) => ({ id: i.id, label: `${i.itemLabel} · ${i.serviceLabel}`, quantity: i.quantity, color: i.color ?? "", brand: i.brand ?? "", observations: i.observations ?? "" })),
+              items: o.items.map((i) => ({ id: i.id, kind: i.kind, label: i.kind === "KILO" ? `${i.itemLabel} · ${formatKg(i.weightGrams ?? 0)}` : `${i.itemLabel} · ${i.serviceLabel}`, quantity: i.quantity, description: i.description ?? "", color: i.color ?? "", brand: i.brand ?? "", observations: i.observations ?? "" })),
             }}
             isAdmin={isAdmin}
             hasOpenSession={!!session}

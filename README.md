@@ -16,9 +16,19 @@ Elle suit le dossier de conception (PRD, TRD, App Flow, UI/UX, schéma, plan d'i
 ## Fonctionnalités
 
 - **Dépôt** en deux colonnes (PC) ou en 4 étapes (téléphone) : client (recherche téléphone/nom, création rapide,
-  alerte doublon), articles fréquents en boutons, observations par ligne, express, remise plafonnée pour l'agent,
+  alerte doublon), articles fréquents en boutons, **courte description par article**, observations par ligne,
+  **prix variables** (ex. blouson de 1 000 à 2 000, choisi au comptoir), express, remise plafonnée pour l'agent,
   acompte. Enregistrement transactionnel et **idempotent** (un double clic ne crée qu'une commande).
-- **Commandes** : onglets par statut, filtres (retard, impayées, dates), actions unitaires et par lot.
+  La saisie est gardée en **brouillon local** (navigateur) : un retour en arrière ou un rechargement ne fait rien perdre.
+- **Linge au kilo et forfaits** : le client achète un forfait (au départ 15 000 = 17 kg, 20 000 = 23 kg,
+  30 000 = 37 kg, modifiables dans Paramètres › Catalogue) ; chaque dépôt au kilo est pesé et déduit de son solde,
+  visible et corrigeable (gérant) sur sa fiche. Un prix du kilo hors forfait peut être fixé (vide = forfait obligatoire).
+- **WhatsApp** : récapitulatif du dépôt à l'enregistrement, « commande prête » quand elle l'est (lien wa.me ;
+  le préfixe 237 est ajouté au numéro s'il manque).
+- **Commandes** : onglets par statut, filtres (retard, impayées, client, **jour / mois / période**), actions
+  unitaires et par lot. Toutes les listes affichent le dernier enregistrement en tête.
+- **Clients** : fiche avec toutes ses commandes, solde forfait et historique ; lien vers la liste filtrée.
+- **Encaissements** : par jour, par mois ou sur une période personnalisée, par mode et par agent.
 - **Détail** : reste à payer en grand, encaissement, remise au client (forcée par le gérant avec motif),
   modification tracée, annulation, retour d'étape, annulation de paiement, historique complet.
 - **Impression 80 mm** : ticket, étiquettes par pièce, reçu de retrait, récapitulatif de clôture.
@@ -27,7 +37,8 @@ Elle suit le dossier de conception (PRD, TRD, App Flow, UI/UX, schéma, plan d'i
   loyer, électricité/eau, entretien, taxes —, répartition par catégorie, bénéfice du mois.
 - **Rapports** : ventes / dépenses / bénéfice sur 12 mois (graphique + tableau), répartition des dépenses,
   CA par mode de paiement, impayés, commandes en souffrance, historique des clôtures, exports CSV.
-- **Paramètres** : infos du ticket, délais et taux, grille de prix article × service éditable, comptes.
+- **Paramètres** : infos du ticket, délais et taux, grille de prix article × service éditable (grille officielle
+  « Blouson » → « Jupe » appliquée une fois au déploiement), forfaits au kilo, comptes.
 - Recherche globale (touche `/`), bandeau hors ligne qui désactive les enregistrements.
 
 ## Démarrage local

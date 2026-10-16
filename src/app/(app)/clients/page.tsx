@@ -29,14 +29,15 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
           <EmptyState icon={<Users />} title={q ? "Aucun client trouvé" : "Aucun client"}>{q ? "Vérifiez l'orthographe ou le numéro (2 caractères minimum)." : "Les clients sont créés lors du dépôt."}</EmptyState>
         ) : (
           <ul className="divide-y divide-line">
-            <li className="hidden grid-cols-[1fr_180px_120px_140px_24px] gap-4 bg-canvas/70 px-5 py-2.5 text-[12.5px] font-medium uppercase tracking-[0.04em] text-ink-3 sm:grid">
-              <span>Nom</span><span>Téléphone</span><span className="text-right">En cours</span><span className="text-right">Montant dû</span><span />
+            <li className="hidden grid-cols-[1fr_180px_110px_110px_140px_24px] gap-4 bg-canvas/70 px-5 py-2.5 text-[12.5px] font-medium uppercase tracking-[0.04em] text-ink-3 sm:grid">
+              <span>Nom</span><span>Téléphone</span><span className="text-right">Commandes</span><span className="text-right">En cours</span><span className="text-right">Montant dû</span><span />
             </li>
             {data.rows.map((c) => (
               <li key={c.id}>
-                <Link href={`/clients/${c.id}`} className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-0.5 px-5 py-3.5 transition hover:bg-canvas sm:grid-cols-[1fr_180px_120px_140px_24px]">
-                  <span className="truncate font-medium">{c.fullName}</span>
+                <Link href={`/clients/${c.id}`} className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-0.5 px-5 py-3.5 transition hover:bg-canvas sm:grid-cols-[1fr_180px_110px_110px_140px_24px]">
+                  <span className="truncate font-medium">{c.fullName}<span className="block text-[12.5px] font-normal text-ink-3 sm:hidden">{c.ordersCount} commande(s)</span></span>
                   <span className="text-sm text-ink-2 tnum sm:text-[14.5px]">{formatPhone(c.phone)}</span>
+                  <span className="hidden text-right tnum sm:block">{c.ordersCount}</span>
                   <span className="hidden text-right tnum sm:block">{c.openOrders || <span className="text-ink-3">—</span>}</span>
                   <span className="hidden text-right sm:block">{c.due > 0 ? <Money value={c.due} strong className="text-warning" /> : <span className="text-ink-3">—</span>}</span>
                   <ChevronRight className="hidden size-4 text-ink-3 sm:block" />

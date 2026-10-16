@@ -46,7 +46,7 @@ export async function activeOrders(): Promise<OfflineOrder[]> {
     createdByName: by ?? "",
     items: items.filter((i) => i.orderId === o.id).map((i) => ({
       itemLabel: i.itemLabel, serviceLabel: i.serviceLabel, unitPrice: i.unitPrice, quantity: i.quantity, lineTotal: i.lineTotal,
-      color: i.color, brand: i.brand, observations: i.observations,
+      description: i.description, color: i.color, brand: i.brand, observations: i.observations,
     })),
   }));
 }

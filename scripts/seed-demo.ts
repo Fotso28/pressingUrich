@@ -34,7 +34,7 @@ import { normalizeName, normalizePhone } from "../src/lib/domain/normalize";
 
 const TZ = "Africa/Douala";
 const START = process.env.DEMO_START ?? "2025-11-01";
-const DEMO_VERSION = "6";
+const DEMO_VERSION = "7";
 // Charges fixes mensuelles (FCFA)
 const RENT = 75_000, WATER = 15_000, TV = 5_000;
 const RENT_EVERY = 3; // loyer payé par trimestre, le premier mois du trimestre
@@ -78,7 +78,17 @@ const OBS = ["tache au col", "tache d'huile", "bouton manquant", "petite déchir
 // Petites dépenses payées à la caisse (comptées dans les intrants ou les autres dépenses du mois).
 const CASH_INTRANTS = [["Lessive (sac 5 kg)", 4500], ["Eau de Javel", 1500], ["Cintres et housses", 2500], ["Sachets plastiques", 1500], ["Détachant", 3000], ["Amidon", 2000]] as const;
 const CASH_OTHER = [["Moto-taxi courses", 500], ["Transport livraison", 1000], ["Fournitures (stylos, carnets)", 1500], ["Eau potable", 500]] as const;
-const ITEM_WEIGHT: Record<string, number> = { "Chemise": 30, "Pantalon": 24, "Tee-shirt": 10, "Robe": 9, "Jupe": 6, "Costume (2 pièces)": 6, "Veste": 5, "Boubou": 6, "Kaba": 4, "Pull": 3, "Manteau": 1, "Cravate": 2, "Drap": 6, "Couette": 2, "Rideau": 2 };
+const ITEM_WEIGHT: Record<string, number> = {
+  "Chemise simple": 22, "Chemise blanche, pagne et djin": 12, "Pantalon": 24, "Tee-shirt": 8, "Robe": 8, "Jupe": 6, "Costume adulte": 6, "Costume enfant": 2,
+  "Veste": 4, "Blouson et blouse": 4, "Boubou simple (courte taille)": 5, "Boubou blanc (courte taille)": 2, "Kaba": 4, "Pull": 2, "Drap simple": 6, "Drap blanc": 2,
+  "Drap doublé": 1, "Couverture ou couvre-lit blanc": 1, "Culotte adulte": 2, "Culotte enfant": 1, "Bermudas, caleçon et string": 2, "Chaussette": 2,
+  "Cravate, nœud papillon, ceinture, foulard": 2, "Tennis et chaussure de couleur": 2, "Tennis et chaussure blanche": 2, "Ensemble grand et enfant": 2,
+  "Gandoura homme (trois pièces)": 2, "Gandoura dame (une pièce)": 2, "Débardeur et singlette": 1, "Rideau": 1, "Manteau": 1,
+};
+const MANY = new Set(["Chemise simple", "Chemise blanche, pagne et djin", "Pantalon", "Tee-shirt", "Chaussette", "Culotte adulte", "Culotte enfant"]);
+const DESCRIPTIONS = ["bleu à rayures", "manches longues", "col mao", "pagne wax jaune", "tissu fragile", "uniforme scolaire", "blanc cassé", "motifs fleuris",
+  "taille enfant", "lin beige", "jean délavé", "costume gris anthracite", "tenue de cérémonie", "carreaux rouges", "brodé main"];
+const KILO_DESCRIPTIONS = ["sac bleu", "linge de maison", "linge de la semaine", "sac de sport noir", "vêtements d'enfants", "draps et serviettes"];
 
 // --- Dates à Douala ---------------------------------------------------------
 const at = (y: number, m: number, d: number, h: number, mi: number) => new Date(new TZDate(y, m, d, h, mi, 0, TZ).getTime());
@@ -106,7 +116,7 @@ const IF_EMPTY = process.argv.includes("--if-empty");
 async function purgeDemo(db: ReturnType<typeof drizzleNeon<typeof s>>) {
   const [meta] = await db.select().from(s.appMeta).where(eq(s.appMeta.key, "demo_version")).limit(1);
   if (!meta) { console.log("PURGE_DEMO_DATA : pas de jeu de démonstration dans cette base, rien n'est effacé."); return; }
-  await db.execute(sql`TRUNCATE offline_ops, reserved_numbers, outflows, cash_session_counts, expenses, payments, order_status_history, order_items, orders, cash_sessions, customers RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE forfait_moves, offline_ops, reserved_numbers, outflows, cash_session_counts, expenses, payments, order_status_history, order_items, orders, cash_sessions, customers RESTART IDENTITY CASCADE`);
   await db.execute(sql`ALTER SEQUENCE order_number_seq RESTART WITH 1`);
   const demo = await db.select({ id: s.user.id }).from(s.user).where(sql`${s.user.username} in ('paul', 'brigitte')`);
   for (const d of demo) {
@@ -149,7 +159,7 @@ async function main() {
   }
   if (n > 0 && !reset) throw new Error(`${n} commandes existent déjà. Relancez avec DEMO_RESET=1 pour tout effacer et régénérer.`);
   if (reset) {
-    await db.execute(sql`TRUNCATE offline_ops, reserved_numbers, outflows, cash_session_counts, expenses, payments, order_status_history, order_items, orders, cash_sessions, customers RESTART IDENTITY CASCADE`);
+    await db.execute(sql`TRUNCATE forfait_moves, offline_ops, reserved_numbers, outflows, cash_session_counts, expenses, payments, order_status_history, order_items, orders, cash_sessions, customers RESTART IDENTITY CASCADE`);
     await db.execute(sql`ALTER SEQUENCE order_number_seq RESTART WITH 1`);
     console.log("Données métier effacées.");
   }
@@ -161,11 +171,12 @@ async function main() {
     throw new Error("Aucun gérant : lancez d'abord `pnpm db:seed`.");
   }
   const catalog = await db.select({
-    itemTypeId: s.prices.itemTypeId, serviceId: s.prices.serviceId, amount: s.prices.amount, item: s.itemTypes.name, service: s.services.shortName,
+    itemTypeId: s.prices.itemTypeId, serviceId: s.prices.serviceId, amount: s.prices.amount, maxAmount: s.prices.maxAmount, item: s.itemTypes.name, service: s.services.shortName,
   }).from(s.prices).innerJoin(s.itemTypes, eq(s.itemTypes.id, s.prices.itemTypeId)).innerJoin(s.services, eq(s.services.id, s.prices.serviceId))
     .where(and(eq(s.prices.active, true), eq(s.itemTypes.active, true), eq(s.services.active, true)));
   if (!catalog.length) throw new Error("Catalogue vide : lancez d'abord `pnpm db:seed`.");
   const items = [...new Set(catalog.map((c) => c.item))];
+  const forfaits = (await db.select().from(s.forfaits).where(eq(s.forfaits.active, true))).sort((a, b) => a.grams - b.grams);
 
   await db.update(s.settings).set({ shopName: "Continental Pressing", address: "Logpom, Douala" })
     .where(and(eq(s.settings.id, 1), eq(s.settings.address, "Douala")));
@@ -232,7 +243,8 @@ async function main() {
   }
 
   // Clients : 70 % d'habitués
-  type Cust = { id: string; fullName: string; phone: string; regular: boolean; repeat: boolean; rate: number; joinAt: Date; visits: number; lastAt: Date | null; address: string | null; firstAt: Date | null };
+  // `kilo` : client au forfait (linge au kilo) ; `balance` : son solde forfait en grammes.
+  type Cust = { id: string; fullName: string; phone: string; regular: boolean; repeat: boolean; rate: number; joinAt: Date; visits: number; lastAt: Date | null; address: string | null; firstAt: Date | null; kilo: boolean; balance: number };
   const usedPhones = new Set<string>();
   const phone = () => {
     for (;;) {
@@ -254,7 +266,7 @@ async function main() {
     const joinAt = regular && chance(0.62) ? startDate : new Date(startDate.getTime() + rnd() * span * (regular ? 0.85 : 0.97));
     custs.push({
       id: randomUUID(), fullName: fullName(), phone: phone(), regular,
-      rate: regular ? 1 / int(9, 30) : 0, repeat: chance(0.3), joinAt, visits: 0, lastAt: null, firstAt: null,
+      rate: regular ? 1 / int(9, 30) : 0, repeat: chance(0.3), joinAt, visits: 0, lastAt: null, firstAt: null, kilo: regular && forfaits.length > 0 && chance(0.09), balance: 0,
       address: chance(0.45) ? pick(QUARTIERS) : null,
     });
   }
@@ -266,6 +278,7 @@ async function main() {
   const itemsRows: (typeof s.orderItems.$inferInsert)[] = [];
   const history: (typeof s.orderStatusHistory.$inferInsert)[] = [];
   const pays: (typeof s.payments.$inferInsert & { at: Date })[] = [];
+  const moves: (typeof s.forfaitMoves.$inferInsert)[] = [];
   const sessions = new Map<string, { id: string; userId: string; day: string; openedAt: Date; closedAt: Date | null; float: number }>();
   const sessionFor = (userId: string, when: Date) => {
     const k = `${userId}|${dayKey(when)}`;
@@ -313,29 +326,47 @@ async function main() {
         }
         c.visits++; c.lastAt = when; c.firstAt ??= when;
 
-        // Articles
-        const nLines = weighted([1, 2, 3, 4, 5], (k) => [30, 32, 22, 11, 5][k - 1]);
-        const chosen = new Set<string>();
-        const lines: { cat: (typeof catalog)[number]; qty: number }[] = [];
-        for (let l = 0; l < nLines; l++) {
-          const it = weighted(items, (x) => ITEM_WEIGHT[x] ?? 1);
-          const options = catalog.filter((p) => p.item === it);
-          const opt = weighted(options, (p) => (p.service === "Lav+Rep" ? 60 : p.service === "Rep" ? 25 : 15));
-          const k = `${opt.itemTypeId}|${opt.serviceId}`;
-          if (chosen.has(k)) continue;
-          chosen.add(k);
-          const qty = it === "Chemise" || it === "Pantalon" || it === "Tee-shirt" ? weighted([1, 2, 3, 4, 5, 6], (q) => [30, 30, 18, 12, 6, 4][q - 1]) : weighted([1, 2, 3], (q) => [70, 22, 8][q - 1]);
-          lines.push({ cat: opt, qty });
+        // Articles : à la pièce, ou linge au kilo pour les clients au forfait (achat d'un forfait quand le solde ne suffit plus).
+        const id = randomUUID();
+        const kiloOrder = c.kilo && chance(0.85);
+        const lines: { cat: (typeof catalog)[number]; qty: number; price: number; description: string | null }[] = [];
+        const special: Omit<typeof s.orderItems.$inferInsert, "orderId" | "lineNo">[] = [];
+        let forfaitPrice = 0;
+        if (kiloOrder) {
+          const grams = int(30, 120) * 100;
+          if (c.balance < grams) {
+            const f = weighted(forfaits, (x) => (x.grams === 23_000 ? 60 : 20));
+            c.balance += f.grams; forfaitPrice = f.price;
+            special.push({ kind: "FORFAIT", forfaitId: f.id, weightGrams: f.grams, itemLabel: f.name, serviceLabel: "Forfait", unitPrice: f.price, quantity: 1, lineTotal: f.price });
+            moves.push({ customerId: c.id, orderId: id, kind: "ACHAT", grams: f.grams, label: `Achat ${f.name}`, createdBy: "", createdAt: when });
+          }
+          c.balance -= grams;
+          special.push({ kind: "KILO", weightGrams: grams, itemLabel: "Linge au kilo", serviceLabel: "Forfait", unitPrice: 0, quantity: 1, lineTotal: 0, description: chance(0.5) ? pick(KILO_DESCRIPTIONS) : null });
+          moves.push({ customerId: c.id, orderId: id, kind: "CONSO", grams: -grams, label: `Linge au kilo (${(grams / 1000).toLocaleString("fr-FR")} kg)`, createdBy: "", createdAt: when });
+        } else {
+          const nLines = weighted([1, 2, 3, 4, 5], (k) => [30, 32, 22, 11, 5][k - 1]);
+          const chosen = new Set<string>();
+          for (let l = 0; l < nLines; l++) {
+            const it = weighted(items, (x) => ITEM_WEIGHT[x] ?? 1);
+            const options = catalog.filter((p) => p.item === it);
+            const opt = weighted(options, (p) => (p.service === "Lav+Rep" ? 60 : p.service === "Rep" ? 25 : 15));
+            const k = `${opt.itemTypeId}|${opt.serviceId}`;
+            if (chosen.has(k)) continue;
+            chosen.add(k);
+            const qty = MANY.has(it) ? weighted([1, 2, 3, 4, 5, 6], (q) => [30, 30, 18, 12, 6, 4][q - 1]) : weighted([1, 2, 3], (q) => [70, 22, 8][q - 1]);
+            // Prix variable : choisi au comptoir selon l'article (pas de 500, le plus souvent dans le bas de la fourchette).
+            const price = opt.maxAmount ? Math.min(opt.maxAmount, opt.amount + 500 * weighted([0, 1, 2, 3], (x) => [50, 30, 15, 5][x])) : opt.amount;
+            lines.push({ cat: opt, qty, price, description: chance(0.3) ? pick(DESCRIPTIONS) : null });
+          }
         }
-        const subtotal = lines.reduce((a, l) => a + l.cat.amount * l.qty, 0);
-        const isExpress = chance(0.09);
+        const subtotal = lines.reduce((a, l) => a + l.price * l.qty, 0) + forfaitPrice;
+        const isExpress = !kiloOrder && chance(0.09);
         const expressAmount = isExpress ? Math.ceil((subtotal * 0.5) / 100) * 100 : 0; // comme computeOrderTotals
         // Geste commercial pour les fidèles : remise ronde de 500 ou 1 000 FCFA.
         const discountAmount = c.regular && c.visits > 6 && subtotal >= 4000 && chance(0.12) ? (subtotal >= 10_000 ? 1000 : 500) : 0;
         const total = subtotal + expressAmount - discountAmount;
 
         // Cycle de vie
-        const id = randomUUID();
         const dueAt = addH(when, isExpress ? 24 : 48);
         const startedAt = shopHours(addH(when, 1 + rnd() * 8));
         // Charge de travail visible à l'ouverture de l'appli : les dépôts des derniers jours sont plus souvent
@@ -348,11 +379,13 @@ async function main() {
         const readyAt = backlog ? addH(now, 6 + rnd() * 40)
           : shopHours(late ? addH(dueAt, 4 + rnd() * 30) : addH(dueAt, -(1 + rnd() * 10)));
         const abandoned = chance(0.009);
-        const cancelled = !abandoned && chance(0.008);
+        const cancelled = !abandoned && !kiloOrder && chance(0.008);
         const pickupDelayDays = recent && chance(0.5) ? 2 + rnd() * 6 : c.regular ? 0.2 + rnd() * rnd() * 9 : 0.5 + rnd() * 14;
         const collectedAt = shopHours(addH(readyAt, pickupDelayDays * 24));
-        const deposit = cancelled ? 0 : chance(0.36) ? total : chance(0.45) ? Math.min(total, Math.round((total * (0.3 + rnd() * 0.4)) / 500) * 500) : 0;
+        // Un forfait se règle entièrement à l'achat.
+        const deposit = cancelled ? 0 : forfaitPrice > 0 ? total : chance(0.36) ? total : chance(0.45) ? Math.min(total, Math.round((total * (0.3 + rnd() * 0.4)) / 500) * 500) : 0;
         const agent = worker(when);
+        for (let m = moves.length - 1; m >= 0 && moves[m].orderId === id; m--) moves[m].createdBy = agent.id;
         let status: s.OrderStatus = "DEPOSEE";
         let amountPaid = 0;
 
@@ -384,9 +417,10 @@ async function main() {
           cancelledAt: status === "ANNULEE" ? history[history.length - 1].changedAt : null, cancelledBy: status === "ANNULEE" ? admin.id : null,
           cancelReason: status === "ANNULEE" ? history[history.length - 1].reason : null,
         });
+        special.forEach((l, i) => itemsRows.push({ ...l, orderId: id, lineNo: i + 1 }));
         lines.forEach((l, i) => itemsRows.push({
           orderId: id, lineNo: i + 1, itemTypeId: l.cat.itemTypeId, serviceId: l.cat.serviceId, itemLabel: l.cat.item, serviceLabel: l.cat.service,
-          unitPrice: l.cat.amount, quantity: l.qty, lineTotal: l.cat.amount * l.qty,
+          unitPrice: l.price, quantity: l.qty, lineTotal: l.price * l.qty, description: l.description,
           color: chance(0.55) ? pick(COLORS) : null, brand: chance(0.25) ? pick(BRANDS) : null, observations: chance(0.12) ? pick(OBS) : null,
         }));
         dayTotal += total;
@@ -398,10 +432,10 @@ async function main() {
   // Calage mois par mois : le CA encaissé d'un mois = retraits des dépôts antérieurs (déjà connus) + encaissements
   // des dépôts du mois. On rejoue le mois en ajustant le volume de dépôts jusqu'à tomber sur l'objectif.
   for (const mo of months) {
-    const snap = { cust: custs.map((c) => [c.visits, c.lastAt, c.firstAt] as const), o: orders.length, i: itemsRows.length, h: history.length, p: pays.length, n: number };
+    const snap = { cust: custs.map((c) => [c.visits, c.lastAt, c.firstAt, c.balance] as const), o: orders.length, i: itemsRows.length, h: history.length, p: pays.length, m: moves.length, n: number };
     const restore = () => {
-      custs.forEach((c, j) => { [c.visits, c.lastAt, c.firstAt] = snap.cust[j]; });
-      orders.length = snap.o; itemsRows.length = snap.i; history.length = snap.h; pays.length = snap.p; number = snap.n;
+      custs.forEach((c, j) => { [c.visits, c.lastAt, c.firstAt, c.balance] = snap.cust[j]; });
+      orders.length = snap.o; itemsRows.length = snap.i; history.length = snap.h; pays.length = snap.p; moves.length = snap.m; number = snap.n;
     };
     const cashIn = () => pays.reduce((a, p) => (monthKey(p.at) === mo.key ? a + (p.amount as number) : a), 0);
     let T = mo.target, best = { T, err: Infinity };
@@ -510,6 +544,7 @@ async function main() {
   await chunk(orders, (b) => db.insert(s.orders).values(b));
   await chunk(itemsRows, (b) => db.insert(s.orderItems).values(b));
   await chunk(history, (b) => db.insert(s.orderStatusHistory).values(b));
+  await chunk(moves, (b) => db.insert(s.forfaitMoves).values(b));
   await chunk(pays.map((p) => { const { at, ...row } = p; void at; return row; }), (b) => db.insert(s.payments).values(b));
   await chunk(exps, (b) => db.insert(s.expenses).values(b));
   await chunk(counts, (b) => db.insert(s.cashSessionCounts).values(b));

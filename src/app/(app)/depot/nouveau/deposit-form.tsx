@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Minus, Plus, Trash2, ChevronDown, Zap, Search, ArrowLeft, ArrowRight, Check, MessageSquareText, Lock, X } from "lucide-react";
+import { Minus, Plus, Trash2, ChevronDown, Zap, Search, ArrowLeft, ArrowRight, Check, MessageSquareText, Lock, X, Scale, Shirt, RotateCcw } from "lucide-react";
 import { createOrder, type CreateOrderInput } from "@/server/actions/orders";
+import { getForfaitBalance } from "@/server/actions/forfaits";
+import type { OrderLineInput } from "@/server/orders/lines";
+import { allocateKilo, formatKg, parseKg } from "@/lib/domain/kilo";
 import type { DepositCatalog } from "@/server/queries/catalog";
 import { CustomerPicker, type PickedCustomer } from "@/components/customers/customer-picker";
 import { Button } from "@/components/ui/button";
@@ -18,10 +21,38 @@ import { useAction } from "@/lib/use-action";
 import { MethodPicker } from "@/components/cash/method-picker";
 import { cn } from "@/lib/cn";
 
-type Line = {
-  key: string; itemTypeId: string; serviceId: string; itemLabel: string; serviceLabel: string; unitPrice: number; quantity: number;
-  color: string; brand: string; observations: string; open: boolean;
+type PieceLine = {
+  key: string; kind: "PIECE"; itemTypeId: string; serviceId: string; itemLabel: string; serviceLabel: string; unitPrice: number; quantity: number;
+  /** Prix variable : bornes du prix choisi au dépôt. */
+  minPrice: number; maxPrice: number | null;
+  description: string; color: string; brand: string; observations: string; open: boolean;
 };
+type KiloLine = { key: string; kind: "KILO"; grams: number; description: string; observations: string };
+type ForfaitLine = { key: string; kind: "FORFAIT"; forfaitId: string; name: string; price: number; grams: number };
+type Line = PieceLine | KiloLine | ForfaitLine;
+export type DepositForfait = { id: string; name: string; price: number; grams: number };
+
+/** Brouillon du dépôt en cours, gardé dans le navigateur : on reprend là où on s'était arrêté. */
+type Draft = {
+  v: 1; savedAt: number; step: Step; customer: PickedCustomer | null; lines: Line[]; isExpress: boolean; dueEdited: string | null;
+  discountType: "MONTANT" | "POURCENT"; discountValue: number | null; notes: string; deposit: number | null; method: Method; reference: string;
+  idempotencyKey: string; depositKey: string;
+};
+const DRAFT_TTL = 3 * 86_400_000;
+const readDraft = (k: string): Draft | null => {
+  try {
+    const d = JSON.parse(localStorage.getItem(k) ?? "null") as Draft | null;
+    return d && d.v === 1 && Date.now() - d.savedAt < DRAFT_TTL ? d : null;
+  } catch { return null; }
+};
+
+/** Prix possibles d'un article à prix variable : pas de 500 entre le minimum et le maximum (6 au plus). */
+function priceSteps(min: number, max: number): number[] {
+  const out = [min];
+  for (let v = Math.ceil((min + 1) / 500) * 500; v < max; v += 500) out.push(v);
+  out.push(max);
+  return out.length <= 6 ? out : [min, max];
+}
 
 const STEPS = ["client", "articles", "options", "paiement"] as const;
 type Step = (typeof STEPS)[number];
@@ -29,8 +60,13 @@ const STEP_LABEL: Record<Step, string> = { client: "Client", articles: "Articles
 
 type SubmitResult = { ok: true; data: { id: string; number: number } } | { ok: false; error: string };
 
-export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin, settings, offline }: {
+export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin, settings, offline, draftKey, forfaits = [], kiloPrice = 0 }: {
   catalog: DepositCatalog;
+  /** Clé du brouillon local (par compte). */
+  draftKey: string;
+  forfaits?: DepositForfait[];
+  /** Prix du kilo hors forfait (0 = seulement avec un forfait). */
+  kiloPrice?: number;
   initialCustomer: PickedCustomer | null;
   hasOpenSession: boolean;
   isAdmin: boolean;
@@ -46,8 +82,8 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
 }) {
   const router = useRouter();
   const { exec, pending } = useAction();
-  const [idempotencyKey] = useState(() => crypto.randomUUID());
-  const [depositKey] = useState(() => crypto.randomUUID());
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [depositKey, setDepositKey] = useState(() => crypto.randomUUID());
   const [step, setStep] = useState<Step>(initialCustomer ? "articles" : "client");
 
   const [customer, setCustomer] = useState<PickedCustomer | null>(initialCustomer);
@@ -63,8 +99,56 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
   const [method, setMethod] = useState<Method>("ESPECES");
   const [reference, setReference] = useState("");
   const [openedAt] = useState(() => new Date());
+  const [mode, setMode] = useState<"PIECE" | "KILO">("PIECE");
+  const [kgText, setKgText] = useState("");
+  const [kgDesc, setKgDesc] = useState("");
+  const [fetchedBalance, setFetchedBalance] = useState<{ customerId: string; grams: number } | null>(null);
+  const balance = fetchedBalance && fetchedBalance.customerId === customer?.id ? fetchedBalance.grams : null;
+  const [restored, setRestored] = useState<number | null>(null);
+  const loaded = useRef(false);
 
-  const priceOf = (itemId: string, serviceId: string) => catalog.prices.find((p) => p.itemTypeId === itemId && p.serviceId === serviceId)?.amount;
+  // Reprise du brouillon (une fois, côté navigateur). Un client passé dans l'URL ouvre un nouveau dépôt pour lui.
+  useEffect(() => {
+    const d = readDraft(draftKey);
+    if (d && (!initialCustomer || d.customer?.id === initialCustomer.id) && (d.lines.length > 0 || d.customer)) {
+      // Le brouillon n'existe que dans le navigateur : il ne peut être lu qu'après le premier rendu.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStep(d.step); setCustomer(d.customer); setLines(d.lines); setIsExpress(d.isExpress); setDueEdited(d.dueEdited);
+      setDiscountType(d.discountType); setDiscountValue(d.discountValue); setNotes(d.notes); setDeposit(d.deposit);
+      setMethod(d.method); setReference(d.reference); setIdempotencyKey(d.idempotencyKey); setDepositKey(d.depositKey);
+      setRestored(d.savedAt);
+    }
+    loaded.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+  // Sauvegarde à chaque modification.
+  useEffect(() => {
+    if (!loaded.current) return;
+    try {
+      if (!customer && lines.length === 0) { localStorage.removeItem(draftKey); return; }
+      const d: Draft = { v: 1, savedAt: Date.now(), step, customer, lines, isExpress, dueEdited, discountType, discountValue, notes, deposit, method, reference, idempotencyKey, depositKey };
+      localStorage.setItem(draftKey, JSON.stringify(d));
+    } catch { /* stockage indisponible : pas de brouillon */ }
+  }, [draftKey, step, customer, lines, isExpress, dueEdited, discountType, discountValue, notes, deposit, method, reference, idempotencyKey, depositKey]);
+  function resetDraft() {
+    try { localStorage.removeItem(draftKey); } catch { /* rien */ }
+    setStep(initialCustomer ? "articles" : "client"); setCustomer(initialCustomer); setLines([]); setIsExpress(false); setDueEdited(null);
+    setDiscountType("MONTANT"); setDiscountValue(null); setNotes(""); setDeposit(null); setMethod("ESPECES"); setReference("");
+    setIdempotencyKey(crypto.randomUUID()); setDepositKey(crypto.randomUUID()); setRestored(null);
+  }
+
+  // Solde forfait du client (linge au kilo), en ligne seulement.
+  useEffect(() => {
+    if (!customer || offline) return;
+    let alive = true;
+    const id = customer.id;
+    getForfaitBalance({ customerId: id }).then((r) => { if (alive && r.ok) setFetchedBalance({ customerId: id, grams: r.data }); });
+    return () => { alive = false; };
+  }, [customer, offline]);
+
+  const priceRow = (itemId: string, serviceId: string) => catalog.prices.find((p) => p.itemTypeId === itemId && p.serviceId === serviceId);
+  const priceOf = (itemId: string, serviceId: string) => priceRow(itemId, serviceId)?.amount;
+  const servicesOf = (itemId: string) => catalog.services.filter((s) => priceOf(itemId, s.id) !== undefined);
   const frequent = catalog.items.filter((i) => i.isFrequent);
   const others = catalog.items.filter((i) => !i.isFrequent);
   const filtered = itemQuery.trim()
@@ -72,33 +156,58 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
     : null;
 
   const discount: DiscountInput = useMemo(() => (discountValue ? { type: discountType, value: discountValue } : null), [discountType, discountValue]);
-  const totals = useMemo(() => computeOrderTotals(lines, { isExpress, expressRatePct: settings.expressRatePct, discount }),
-    [lines, isExpress, settings.expressRatePct, discount]);
+  // Linge au kilo : couvert par le solde forfait du client et les forfaits achetés dans ce dépôt.
+  const alloc = useMemo(() => allocateKilo(balance ?? 0, lines.map((l) => ({ kind: l.kind, grams: l.kind === "PIECE" ? 0 : l.grams })), kiloPrice), [balance, lines, kiloPrice]);
+  const priced = useMemo(() => lines.map((l, i) => (l.kind === "PIECE" ? { unitPrice: l.unitPrice, quantity: l.quantity }
+    : l.kind === "FORFAIT" ? { unitPrice: l.price, quantity: 1, noSurcharge: true } : { unitPrice: alloc.lines[i]?.price ?? 0, quantity: 1 })), [lines, alloc]);
+  const totals = useMemo(() => computeOrderTotals(priced, { isExpress, expressRatePct: settings.expressRatePct, discount }),
+    [priced, isExpress, settings.expressRatePct, discount]);
+  const hasKilo = lines.some((l) => l.kind === "KILO");
+  const kiloMissing = hasKilo && balance !== null ? alloc.missing : 0;
+  const onlyForfaits = lines.length > 0 && lines.every((l) => l.kind === "FORFAIT");
   const autoDue = computeDueAt(openedAt, { isExpress, standardHours: settings.standardDelayHours, expressHours: settings.expressDelayHours });
   const dueValue = dueEdited ?? toDateTimeLocal(autoDue);
   const discountTooHigh = !isAdmin && totals.discountPct > settings.agentMaxDiscountPct + 1e-9;
   const depositTooHigh = (deposit ?? 0) > totals.total;
   const depositBlocked = (deposit ?? 0) > 0 && !hasOpenSession;
-  const pieces = lines.reduce((s, l) => s + l.quantity, 0);
+  const pieces = lines.reduce((s, l) => s + (l.kind === "PIECE" ? l.quantity : 0), 0);
+  const kilos = lines.reduce((s, l) => s + (l.kind === "KILO" ? l.grams : 0), 0);
+  const countLabel = [pieces ? `${pieces} pièce${pieces > 1 ? "s" : ""}` : "", kilos ? formatKg(kilos) : ""].filter(Boolean).join(" · ");
+  // Vente de forfait seule : elle se règle entièrement tout de suite.
+  const forfaitUnpaid = onlyForfaits && (deposit ?? 0) < totals.total;
 
   function addLine(itemTypeId: string, serviceId: string) {
-    const unitPrice = priceOf(itemTypeId, serviceId);
-    if (unitPrice === undefined) return;
+    const p = priceRow(itemTypeId, serviceId);
+    if (!p) return;
     const item = catalog.items.find((i) => i.id === itemTypeId)!;
     const svc = catalog.services.find((s) => s.id === serviceId)!;
     setLines((ls) => {
-      const same = ls.find((l) => l.itemTypeId === itemTypeId && l.serviceId === serviceId && !l.color && !l.brand && !l.observations);
-      if (same) return ls.map((l) => (l === same ? { ...l, quantity: l.quantity + 1 } : l));
-      return [...ls, { key: crypto.randomUUID(), itemTypeId, serviceId, itemLabel: item.name, serviceLabel: svc.shortName, unitPrice, quantity: 1, color: "", brand: "", observations: "", open: false }];
+      const same = ls.find((l): l is PieceLine => l.kind === "PIECE" && l.itemTypeId === itemTypeId && l.serviceId === serviceId && l.maxPrice === null && !l.description && !l.color && !l.brand && !l.observations);
+      if (same) return ls.map((l) => (l === same ? { ...same, quantity: same.quantity + 1 } : l));
+      return [...ls, { key: crypto.randomUUID(), kind: "PIECE", itemTypeId, serviceId, itemLabel: item.name, serviceLabel: svc.shortName, unitPrice: p.amount,
+        minPrice: p.amount, maxPrice: p.maxAmount ?? null, quantity: 1, description: "", color: "", brand: "", observations: "", open: false }];
     });
     setPickedItem(null);
     setItemQuery("");
   }
-  const updateLine = (key: string, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  /** Un article proposé dans un seul service s'ajoute directement ; sinon on choisit le service. */
+  function pickItem(itemTypeId: string) {
+    const svcs = servicesOf(itemTypeId);
+    if (svcs.length === 1) addLine(itemTypeId, svcs[0].id); else setPickedItem(itemTypeId);
+  }
+  const updateLine = (key: string, patch: Partial<PieceLine> | Partial<KiloLine>) => setLines((ls) => ls.map((l) => (l.key === key ? ({ ...l, ...patch } as Line) : l)));
+  const kgGrams = parseKg(kgText);
+  function addKilo() {
+    if (!kgGrams) return;
+    setLines((ls) => [...ls, { key: crypto.randomUUID(), kind: "KILO", grams: kgGrams, description: kgDesc.trim(), observations: "" }]);
+    setKgText(""); setKgDesc("");
+  }
+  const addForfait = (f: DepositForfait) => setLines((ls) => [...ls, { key: crypto.randomUUID(), kind: "FORFAIT", forfaitId: f.id, name: f.name, price: f.price, grams: f.grams }]);
 
-  const canNext: Record<Step, boolean> = { client: !!customer, articles: lines.length > 0, options: !discountTooHigh, paiement: true };
-  const blockedReason = offline?.blockedReason ?? null;
-  const canSubmit = !!customer && lines.length > 0 && !discountTooHigh && !depositTooHigh && !depositBlocked && !blockedReason;
+  const badPrice = lines.some((l) => l.kind === "PIECE" && l.maxPrice !== null && (l.unitPrice < l.minPrice || l.unitPrice > l.maxPrice || l.unitPrice % 100 !== 0));
+  const canNext: Record<Step, boolean> = { client: !!customer, articles: lines.length > 0 && !kiloMissing && !badPrice && !(hasKilo && balance === null && !offline), options: !discountTooHigh, paiement: true };
+  const blockedReason = offline?.blockedReason ?? (offline && lines.some((l) => l.kind !== "PIECE") ? "Linge au kilo et forfaits : connexion internet nécessaire." : null);
+  const canSubmit = !!customer && canNext.articles && !discountTooHigh && !depositTooHigh && !depositBlocked && !blockedReason && !forfaitUnpaid;
 
   async function submit() {
     if (!customer) { setStep("client"); return; }
@@ -107,13 +216,19 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
     await exec(() => send({
       idempotencyKey,
       customerId: customer.id,
-      lines: lines.map((l) => ({ itemTypeId: l.itemTypeId, serviceId: l.serviceId, quantity: l.quantity, color: l.color, brand: l.brand, observations: l.observations })),
+      lines: lines.map((l): OrderLineInput => (l.kind === "PIECE"
+        ? { kind: "PIECE", itemTypeId: l.itemTypeId, serviceId: l.serviceId, quantity: l.quantity, unitPrice: l.maxPrice !== null ? l.unitPrice : null, description: l.description, color: l.color, brand: l.brand, observations: l.observations }
+        : l.kind === "KILO" ? { kind: "KILO", grams: l.grams, description: l.description, observations: l.observations }
+        : { kind: "FORFAIT", forfaitId: l.forfaitId })),
       isExpress,
       dueAt: dueEdited && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
       discount,
       notes,
       deposit: deposit ? { idempotencyKey: depositKey, amount: deposit, method, reference: method === "ESPECES" ? "" : reference } : null,
-    }), { onSuccess: (d) => (offline ? offline.onDone(d) : router.push(`/depot/confirmation/${d.id}`)) });
+    }), { onSuccess: (d) => {
+      try { localStorage.removeItem(draftKey); } catch { /* rien */ }
+      if (offline) offline.onDone(d); else router.push(`/depot/confirmation/${d.id}`);
+    } });
   }
 
   const vis = (s: Step) => cn(step !== s && "hidden", "lg:block");
@@ -128,6 +243,13 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
         </div>
         {!offline && <Link href="/" className="grid size-10 place-items-center rounded-md text-ink-3 hover:bg-subtle lg:hidden" aria-label="Quitter le dépôt"><X className="size-5" /></Link>}
       </div>
+
+      {restored && (
+        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-brand-100 bg-brand-50/60 px-4 py-2.5 text-sm">
+          <span className="flex-1 text-ink-2">Brouillon repris : le dépôt en cours a été conservé.</span>
+          <button type="button" onClick={resetDraft} className="flex items-center gap-1.5 font-medium text-brand"><RotateCcw className="size-4" />Recommencer</button>
+        </div>
+      )}
 
       {/* Progression (téléphone) */}
       <ol className="mb-4 grid grid-cols-4 gap-1.5 lg:hidden">
@@ -154,6 +276,18 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
 
           <section className={cn(vis("articles"), "rounded-lg border border-line bg-surface p-4 shadow-card sm:p-5")}>
             <StepTitle n={2} title="Articles" done={lines.length > 0} />
+            <div className="mb-4 grid grid-cols-2 rounded-lg border border-line-2 p-1" role="tablist" aria-label="Type de dépôt">
+              {([["PIECE", "À la pièce", Shirt], ["KILO", "Au kilo", Scale]] as const).map(([m, label, Icon]) => (
+                <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)}
+                  className={cn("flex h-10 items-center justify-center gap-2 rounded-md text-[14.5px] font-medium transition", mode === m ? "bg-brand text-white" : "text-ink-2 hover:bg-subtle")}>
+                  <Icon className="size-4" />{label}
+                </button>
+              ))}
+            </div>
+            {mode === "KILO" ? (
+              <KiloPanel offline={!!offline} customer={customer} balance={balance} alloc={alloc} lines={lines} forfaits={forfaits} kiloPrice={kiloPrice}
+                kgText={kgText} setKgText={setKgText} kgDesc={kgDesc} setKgDesc={setKgDesc} kgGrams={kgGrams} onAdd={addKilo} onForfait={addForfait} />
+            ) : (<>
             <div className="relative mb-4">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
               <Input value={itemQuery} onChange={(e) => setItemQuery(e.target.value)} placeholder="Chercher un article…" className="pl-9" aria-label="Chercher un article" />
@@ -164,7 +298,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
             {(filtered ?? frequent).length > 0 && (
               <>
                 {!filtered && <p className="eyebrow mb-2">Articles fréquents</p>}
-                <ItemGrid items={filtered ?? frequent} picked={pickedItem} onPick={setPickedItem} lines={lines} />
+                <ItemGrid items={filtered ?? frequent} picked={pickedItem} onPick={pickItem} lines={lines} />
               </>
             )}
             {!filtered && others.length > 0 && (
@@ -172,7 +306,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
                 <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink">
                   <ChevronDown className="size-4 transition group-open:rotate-180" /> Autres articles ({others.length})
                 </summary>
-                <div className="mt-3"><ItemGrid items={others} picked={pickedItem} onPick={setPickedItem} lines={lines} /></div>
+                <div className="mt-3"><ItemGrid items={others} picked={pickedItem} onPick={pickItem} lines={lines} /></div>
               </details>
             )}
             {pickedItem && (
@@ -193,7 +327,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
                       <button key={s.id} type="button" onClick={() => addLine(pickedItem, s.id)}
                         className="flex min-h-[3.25rem] items-center justify-between gap-2 rounded-md border border-line-2 bg-surface px-3.5 py-2 text-left transition hover:border-brand hover:ring-3 hover:ring-brand/10">
                         <span className="text-[14.5px] font-medium leading-tight">{s.name}</span>
-                        <Money value={p} unit={false} className="text-sm font-semibold text-brand" />
+                        <span className="text-sm font-semibold text-brand tnum"><Money value={p} unit={false} />{priceRow(pickedItem, s.id)?.maxAmount != null && <> – <Money value={priceRow(pickedItem, s.id)!.maxAmount!} unit={false} /></>}</span>
                       </button>
                     );
                   })}
@@ -201,6 +335,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
               </div>
               </>
             )}
+            </>)}
           </section>
         </div>
 
@@ -209,23 +344,38 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
           <section className={cn(vis("articles"), "rounded-lg border border-line bg-surface shadow-card")}>
             <div className="flex items-center justify-between px-5 pt-4 pb-3">
               <h2 className="text-[15px] font-semibold">Panier</h2>
-              <span className="text-sm text-ink-3 tnum">{pieces} pièce{pieces > 1 ? "s" : ""}</span>
+              <span className="text-sm text-ink-3 tnum">{countLabel || "Vide"}</span>
             </div>
             {lines.length === 0 ? (
-              <p className="border-t border-line px-5 py-8 text-center text-sm text-ink-3">Touchez un article puis un service pour l&apos;ajouter.</p>
+              <p className="border-t border-line px-5 py-8 text-center text-sm text-ink-3">Touchez un article pour l&apos;ajouter, ou pesez le linge dans « Au kilo ».</p>
             ) : (
               <ul className="divide-y divide-line border-t border-line">
-                {lines.map((l) => {
+                {lines.map((l, idx) => {
+                  if (l.kind !== "PIECE") return <SpecialLine key={l.key} line={l} alloc={alloc.lines[idx]} onChange={(patch) => updateLine(l.key, patch)} onRemove={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} />;
                   const hasObs = !!(l.color || l.brand || l.observations);
                   return (
                     <li key={l.key} className="px-4 py-3">
                       <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[15px] font-medium">{l.itemLabel}</p>
-                          <p className="text-[13px] text-ink-3">{l.serviceLabel} · <Money value={l.unitPrice} unit={false} /> l&apos;unité</p>
+                          <p className="text-[13px] text-ink-3">{l.serviceLabel} · <Money value={l.unitPrice} unit={false} /> l&apos;unité{l.maxPrice !== null && <> (prix de <Money value={l.minPrice} unit={false} /> à <Money value={l.maxPrice} unit={false} />)</>}</p>
                         </div>
                         <Money value={l.unitPrice * l.quantity} unit={false} className="pt-0.5 text-right text-[15px] font-semibold" />
                       </div>
+                      {l.maxPrice !== null && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {priceSteps(l.minPrice, l.maxPrice).map((v) => (
+                            <button key={v} type="button" onClick={() => updateLine(l.key, { unitPrice: v })}
+                              className={cn("h-8 rounded-full border px-2.5 text-[13px] font-medium tnum", l.unitPrice === v ? "border-brand bg-brand-50 text-brand" : "border-line-2 text-ink-2 hover:bg-subtle")}>
+                              <Money value={v} unit={false} />
+                            </button>
+                          ))}
+                          <div className="w-32"><AmountInput value={l.unitPrice} onChange={(v) => updateLine(l.key, { unitPrice: v ?? l.minPrice })} aria-label={`Prix de ${l.itemLabel}`}
+                            aria-invalid={l.unitPrice < l.minPrice || l.unitPrice > l.maxPrice || l.unitPrice % 100 !== 0} /></div>
+                        </div>
+                      )}
+                      <Input value={l.description} onChange={(e) => updateLine(l.key, { description: e.target.value.slice(0, 120) })}
+                        placeholder="Description (ex. bleu à rayures, manches longues)" aria-label={`Description de ${l.itemLabel}`} className="mt-2 h-10 text-[14px]" />
                       <div className="mt-2 flex items-center gap-1">
                         <div className="flex items-center rounded-md border border-line-2">
                           <button type="button" className="grid size-10 place-items-center text-ink-2 hover:bg-subtle disabled:opacity-40" aria-label="Moins"
@@ -304,7 +454,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
               <StepTitle n={4} title="Récapitulatif et acompte" />
               {customer && <p className="-mt-1 mb-4 text-sm text-ink-3">Client : <span className="font-medium text-ink">{customer.fullName}</span></p>}
               <dl className="space-y-2 text-[14.5px]">
-                <Row label={`Sous-total (${pieces} pièce${pieces > 1 ? "s" : ""})`}><Money value={totals.subtotal} /></Row>
+                <Row label={`Sous-total${countLabel ? ` (${countLabel})` : ""}`}><Money value={totals.subtotal} /></Row>
                 {totals.expressAmount > 0 && <Row label={`Express +${settings.expressRatePct} %`}><Money value={totals.expressAmount} /></Row>}
                 {totals.discountAmount > 0 && <Row label="Remise"><span className="text-success">−<Money value={totals.discountAmount} /></span></Row>}
               </dl>
@@ -314,7 +464,8 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
               </div>
             </div>
             <div className="space-y-3 border-t border-line bg-canvas/50 p-5">
-              <Field label="Acompte (facultatif)" error={depositTooHigh ? "L'acompte dépasse le total." : undefined}>
+              <Field label={onlyForfaits ? "Paiement du forfait" : "Acompte (facultatif)"} error={depositTooHigh ? "L'acompte dépasse le total." : forfaitUnpaid && (deposit ?? 0) > 0 ? "Un forfait se règle entièrement à l'achat." : undefined}
+                hint={onlyForfaits && !deposit ? "Un forfait se règle entièrement à l'achat : touchez « Tout »." : undefined}>
                 <div className="flex gap-2">
                   <div className="flex-1"><AmountInput value={deposit} onChange={setDeposit} placeholder="0" aria-label="Acompte" aria-invalid={depositTooHigh} /></div>
                   <Button type="button" variant="secondary" onClick={() => setDeposit(totals.total || null)} disabled={!totals.total}>Tout</Button>
@@ -343,7 +494,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
               )}
               {!canSubmit && !blockedReason && (
                 <p className="hidden text-center text-[13px] text-ink-3 lg:block">
-                  {!customer ? "Choisissez un client." : lines.length === 0 ? "Ajoutez au moins un article." : "Corrigez les champs signalés."}
+                  {!customer ? "Choisissez un client." : lines.length === 0 ? "Ajoutez au moins un article." : kiloMissing ? `Solde forfait insuffisant : il manque ${formatKg(kiloMissing)}.` : forfaitUnpaid ? "Encaissez la totalité du forfait." : "Corrigez les champs signalés."}
                 </p>
               )}
             </div>
@@ -358,7 +509,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
             <Button type="button" variant="secondary" size="icon" onClick={() => setStep(STEPS[stepIndex - 1])} aria-label="Étape précédente"><ArrowLeft /></Button>
           )}
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] text-ink-3">Total{pieces > 0 && ` · ${pieces} pièce${pieces > 1 ? "s" : ""}`}</p>
+            <p className="text-[12px] text-ink-3">Total{countLabel && ` · ${countLabel}`}</p>
             <Money value={totals.total} className="text-lg font-semibold" />
           </div>
           {step === "paiement" ? (
@@ -387,11 +538,85 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return <div className="flex items-center justify-between"><dt className="text-ink-2">{label}</dt><dd className="tnum">{children}</dd></div>;
 }
 
+/** Ligne de linge au kilo ou d'achat de forfait dans le panier. */
+function SpecialLine({ line: l, alloc, onChange, onRemove }: {
+  line: KiloLine | ForfaitLine; alloc: { covered: number; uncovered: number; price: number } | null | undefined;
+  onChange: (patch: Partial<KiloLine>) => void; onRemove: () => void;
+}) {
+  return (
+    <li className="px-4 py-3">
+      <div className="flex items-start gap-2">
+        <Scale className="mt-0.5 size-4 shrink-0 text-ink-3" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[15px] font-medium">{l.kind === "KILO" ? `Linge au kilo · ${formatKg(l.grams)}` : l.name}</p>
+          <p className="text-[13px] text-ink-3">
+            {l.kind === "FORFAIT" ? <>Achat de forfait · +{formatKg(l.grams)} au solde</>
+              : alloc && alloc.uncovered > 0 ? (alloc.price > 0 ? <>{formatKg(alloc.covered)} au forfait · {formatKg(alloc.uncovered)} au prix du kilo</> : <span className="text-danger">Solde insuffisant : il manque {formatKg(alloc.uncovered)}</span>)
+              : "Déduit du solde forfait"}
+          </p>
+        </div>
+        {l.kind === "KILO" && !alloc?.price ? <span className="pt-0.5 text-[14px] font-medium text-success">inclus</span>
+          : <Money value={l.kind === "FORFAIT" ? l.price : (alloc?.price ?? 0)} unit={false} className="pt-0.5 text-right text-[15px] font-semibold" />}
+        <button type="button" onClick={onRemove} aria-label="Retirer la ligne" className="-mt-1 grid size-10 place-items-center rounded-md text-ink-3 hover:bg-danger-50 hover:text-danger"><Trash2 className="size-[18px]" /></button>
+      </div>
+      {l.kind === "KILO" && (
+        <Input value={l.description} onChange={(e) => onChange({ description: e.target.value.slice(0, 120) })} placeholder="Description (ex. sac bleu, linge de maison)"
+          aria-label="Description du linge au kilo" className="mt-2 h-10 text-[14px]" />
+      )}
+    </li>
+  );
+}
+
+/** Saisie du linge au kilo : poids, solde forfait du client, achat de forfait. */
+function KiloPanel({ offline, customer, balance, alloc, lines, forfaits, kiloPrice, kgText, setKgText, kgDesc, setKgDesc, kgGrams, onAdd, onForfait }: {
+  offline: boolean; customer: PickedCustomer | null; balance: number | null; alloc: ReturnType<typeof allocateKilo>; lines: Line[];
+  forfaits: DepositForfait[]; kiloPrice: number; kgText: string; setKgText: (v: string) => void; kgDesc: string; setKgDesc: (v: string) => void;
+  kgGrams: number | null; onAdd: () => void; onForfait: (f: DepositForfait) => void;
+}) {
+  if (offline) return <p className="rounded-md bg-warning-50 px-3 py-2 text-sm text-[#8a5300]">Le linge au kilo et les forfaits demandent une connexion internet (solde du client).</p>;
+  if (!customer) return <p className="rounded-md bg-canvas px-3 py-2 text-sm text-ink-3">Choisissez d&apos;abord le client : son solde forfait s&apos;affichera ici.</p>;
+  const bought = lines.reduce((a, l) => a + (l.kind === "FORFAIT" ? l.grams : 0), 0);
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-lg bg-canvas px-4 py-3">
+        <span className="min-w-0 truncate text-sm text-ink-2">Solde forfait · {customer.fullName}</span>
+        <span className="font-semibold tnum">{balance === null ? "…" : formatKg(balance)}{bought > 0 && <span className="text-success"> +{formatKg(bought)}</span>}</span>
+      </div>
+      <form className="grid grid-cols-1 gap-2 sm:grid-cols-[8rem_minmax(0,1fr)_auto]" onSubmit={(e) => { e.preventDefault(); onAdd(); }}>
+        <div className="relative">
+          <Input inputMode="decimal" value={kgText} onChange={(e) => setKgText(e.target.value)} placeholder="Poids" aria-label="Poids en kg" className="pr-10 text-right tnum" />
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-ink-3">kg</span>
+        </div>
+        <Input value={kgDesc} onChange={(e) => setKgDesc(e.target.value.slice(0, 120))} placeholder="Description (facultatif)" aria-label="Description" />
+        <Button type="submit" disabled={!kgGrams}><Plus />Ajouter</Button>
+      </form>
+      <p className="text-[13px] text-ink-3">
+        Restera après ce dépôt : <span className="font-medium text-ink tnum">{formatKg(Math.max(0, alloc.balanceAfter))}</span>
+        {kiloPrice > 0 ? <> · hors forfait : <Money value={kiloPrice} unit={false} /> FCFA/kg</> : " · sans forfait, le linge au kilo n'est pas possible."}
+      </p>
+      {forfaits.length > 0 && (
+        <div>
+          <p className="eyebrow mb-2">Acheter un forfait</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {forfaits.map((f) => (
+              <button key={f.id} type="button" onClick={() => onForfait(f)}
+                className="flex min-h-[3.25rem] items-center justify-between gap-2 rounded-md border border-line-2 bg-surface px-3.5 py-2 text-left transition hover:border-brand hover:ring-3 hover:ring-brand/10">
+                <span className="text-[14.5px] font-medium leading-tight">{formatKg(f.grams)}</span>
+                <Money value={f.price} unit={false} className="text-sm font-semibold text-brand" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ItemGrid({ items, picked, onPick, lines }: { items: { id: string; name: string }[]; picked: string | null; onPick: (id: string) => void; lines: Line[] }) {
   return (
     <div className="grid grid-cols-3 gap-2 xl:grid-cols-4">
       {items.map((i) => {
-        const count = lines.filter((l) => l.itemTypeId === i.id).reduce((s, l) => s + l.quantity, 0);
+        const count = lines.reduce((s, l) => s + (l.kind === "PIECE" && l.itemTypeId === i.id ? l.quantity : 0), 0);
         return (
           <button key={i.id} type="button" onClick={() => onPick(i.id)}
             className={cn("relative flex min-h-14 items-center justify-center rounded-lg border px-2 py-2.5 text-center text-[14px] sm:min-h-16 sm:px-3 sm:text-[14.5px] font-medium leading-tight transition",

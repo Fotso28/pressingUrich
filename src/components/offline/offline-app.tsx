@@ -179,18 +179,19 @@ function DepositTab({ state, onOpenCash, print }: { state: OfflineState; onOpenC
     const number = s.numbers[0];
     if (!number) return { ok: false as const, error: "Plus de numéro de ticket : connectez-vous à internet pour obtenir de nouveaux numéros." };
     if (input.deposit && !s.session) return { ok: false as const, error: "Ouvrez votre caisse avant d'encaisser un acompte." };
+    if (input.lines.some((l) => l.kind !== "PIECE")) return { ok: false as const, error: "Linge au kilo et forfaits : connexion internet nécessaire (solde du client)." };
     const id = uuid(), at = nowIso();
     const dueAt = input.dueAt ?? computeDueAt(new Date(), { isExpress: input.isExpress, standardHours: s.settings.standardDelayHours, expressHours: s.settings.expressDelayHours }).toISOString();
     const next = await perform({
       type: "CREATE_ORDER", opId: uuid(), at, id, number, customerId: input.customerId, isExpress: input.isExpress, dueAt, notes: input.notes || null,
-      lines: input.lines.map((l) => ({ itemTypeId: l.itemTypeId, serviceId: l.serviceId, quantity: l.quantity, color: l.color || null, brand: l.brand || null, observations: l.observations || null })),
+      lines: input.lines.flatMap((l) => (l.kind === "PIECE" ? [{ itemTypeId: l.itemTypeId, serviceId: l.serviceId, quantity: l.quantity, unitPrice: l.unitPrice ?? null, description: l.description || null, color: l.color || null, brand: l.brand || null, observations: l.observations || null }] : [])),
       deposit: input.deposit && s.session ? { paymentId: uuid(), sessionId: s.session.id, amount: input.deposit.amount, method: input.deposit.method, reference: input.deposit.reference || null } : null,
     });
     setDone(next.orders.find((o) => o.id === id) ?? null);
     return { ok: true as const, data: { id, number } };
   }
   return (
-    <DepositForm key={round} catalog={state.catalog} initialCustomer={null} hasOpenSession={!!state.session} isAdmin={false}
+    <DepositForm key={round} catalog={state.catalog} draftKey={`cp-depot-brouillon-hl:${state.user.id}`} initialCustomer={null} hasOpenSession={!!state.session} isAdmin={false}
       settings={{ ...state.settings, agentMaxDiscountPct: 0 }}
       offline={{
         customerPicker: (value, onChange) => (
@@ -279,7 +280,7 @@ function OrderDialog({ state, order: o, onClose, print }: { state: OfflineState;
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent title={`Ticket n° ${formatOrderNumber(o.number)}`} description={`${o.customerName} · ${formatPhone(o.customerPhone)}`}>
         <ul className="space-y-1 text-[14px]">
-          {o.items.map((i, k) => <li key={k} className="flex justify-between gap-3"><span>{i.quantity} × {i.itemLabel} <span className="text-ink-3">{i.serviceLabel}</span></span><Money value={i.lineTotal} unit={false} /></li>)}
+          {o.items.map((i, k) => <li key={k} className="flex justify-between gap-3"><span>{i.quantity} × {i.itemLabel} <span className="text-ink-3">{i.serviceLabel}</span>{i.description && <span className="block text-[13px] text-ink-3">{i.description}</span>}</span><Money value={i.lineTotal} unit={false} /></li>)}
         </ul>
         <dl className="mt-3 space-y-1 border-t border-line pt-3 text-[14px]">
           <div className="flex justify-between"><dt>Total</dt><dd><Money value={o.total} strong /></dd></div>

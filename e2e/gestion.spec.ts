@@ -20,10 +20,10 @@ test.describe.serial("Gestion du gérant", () => {
     await page.getByRole("button", { name: "Article" }).click();
     const dlg = page.getByRole("dialog");
     await dlg.getByLabel("Nom").fill(ITEM);
-    await dlg.getByLabel("Lavage + repassage").fill("1550");
+    await dlg.getByLabel("Prix Lavage + repassage", { exact: true }).fill("1550");
     await expect(dlg.getByText("Multiple de 100 FCFA.")).toBeVisible();
     await expect(dlg.getByRole("button", { name: "Enregistrer" })).toBeDisabled();
-    await dlg.getByLabel("Lavage + repassage").fill("2500");
+    await dlg.getByLabel("Prix Lavage + repassage", { exact: true }).fill("2500");
     await dlg.getByRole("button", { name: "Enregistrer" }).click();
     await expect(page.getByText("Article créé.")).toBeVisible();
     const row = page.getByRole("row", { name: new RegExp(ITEM) });
@@ -86,10 +86,17 @@ test.describe.serial("Gestion du gérant", () => {
     await expect(page.getByText("Salaire de base enregistré.")).toBeVisible();
   });
 
-  test("encaissements du jour : page de détail accessible depuis l'accueil", async ({ page }) => {
+  test("encaissements : accessibles depuis l'accueil, filtres jour / mois / période", async ({ page }) => {
     await login(page);
     await page.getByRole("link", { name: "Détail" }).click();
     await expect(page).toHaveURL(/\/encaissements/);
-    await expect(page.getByRole("heading", { name: "Encaissements du jour" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Encaissements" })).toBeVisible();
+    await expect(page.getByText("Aujourd'hui", { exact: true })).toBeVisible();
+    // Filtre par mois puis par période personnalisée.
+    await page.getByLabel("Période", { exact: true }).selectOption("mois");
+    await expect(page).toHaveURL(/periode=mois&mois=\d{4}-\d{2}/);
+    await expect(page.getByText(/Total encaissé/)).toBeVisible();
+    await page.getByLabel("Période", { exact: true }).selectOption("perso");
+    await expect(page).toHaveURL(/periode=perso&du=/);
   });
 });

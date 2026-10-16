@@ -5,13 +5,14 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { formatAmount } from "@/lib/domain/money";
 import { db, type Tx } from "../db";
-import { cashSessions, itemTypes, orderItems, orderStatusHistory, orders, payments, prices, services } from "../db/schema";
+import { cashSessions, orderItems, orderStatusHistory, orders, payments } from "../db/schema";
 import { requireRole, requireUser, type CurrentUser } from "../session";
 import { fail, pgCode, run } from "../action-utils";
 import { methodSchema, optText, positiveAmount, reasonSchema } from "../validation";
 import { getSettings } from "../queries/settings";
 import { computeOrderTotals, type DiscountInput } from "@/lib/domain/totals";
 import { computeDueAt } from "@/lib/domain/dates";
+import { itemRows, orderLineSchema, type OrderLineInput, recordMoves, resolveLines, reverseMoves } from "../orders/lines";
 import { canCancel, nextWorkshopStatus, previousStatus, type OrderStatus } from "@/lib/domain/status";
 
 const discountSchema = z.object({
@@ -19,19 +20,10 @@ const discountSchema = z.object({
   value: z.number().int().min(0, "Remise invalide.").max(100_000_000, "Remise invalide."),
 }).nullable();
 
-const lineSchema = z.object({
-  itemTypeId: z.uuid(),
-  serviceId: z.uuid(),
-  quantity: z.number().int().min(1, "Quantité minimale : 1.").max(999),
-  color: optText,
-  brand: optText,
-  observations: optText,
-});
-
 const createOrderSchema = z.object({
   idempotencyKey: z.uuid(),
   customerId: z.uuid({ message: "Choisissez un client." }),
-  lines: z.array(lineSchema).min(1, "Ajoutez au moins un article.").max(100, "100 lignes maximum."),
+  lines: z.array(orderLineSchema).min(1, "Ajoutez au moins un article.").max(100, "100 lignes maximum."),
   isExpress: z.boolean(),
   dueAt: z.iso.datetime().nullable(),
   discount: discountSchema,
@@ -44,7 +36,7 @@ const createOrderSchema = z.object({
   }).nullable(),
 });
 
-export type CreateOrderInput = z.input<typeof createOrderSchema>;
+export type CreateOrderInput = Omit<z.input<typeof createOrderSchema>, "lines"> & { lines: OrderLineInput[] };
 
 function checkDiscount(user: CurrentUser, discountPct: number, maxPct: number) {
   // F-DEP-06 : au-delà du plafond, la remise est réservée au gérant.
@@ -68,31 +60,19 @@ export async function createOrder(raw: CreateOrderInput) {
     if (existing) return existing;
 
     const settings = await getSettings();
-    const pairs = await db.select({
-      itemTypeId: prices.itemTypeId, serviceId: prices.serviceId, amount: prices.amount,
-      itemLabel: itemTypes.name, serviceLabel: services.shortName,
-    }).from(prices)
-      .innerJoin(itemTypes, eq(itemTypes.id, prices.itemTypeId))
-      .innerJoin(services, eq(services.id, prices.serviceId))
-      .where(and(eq(prices.active, true), eq(itemTypes.active, true), eq(services.active, true),
-        inArray(prices.itemTypeId, input.lines.map((l) => l.itemTypeId))));
-    const lines = input.lines.map((l, i) => {
-      const p = pairs.find((x) => x.itemTypeId === l.itemTypeId && x.serviceId === l.serviceId);
-      if (!p) fail(`Ligne ${i + 1} : cette combinaison article × service n'a pas de prix.`);
-      return { ...l, unitPrice: p.amount, itemLabel: p.itemLabel, serviceLabel: p.serviceLabel, lineNo: i + 1 };
-    });
-
-    const expressRatePct = input.isExpress ? settings.expressRatePct : 0;
-    const totals = computeOrderTotals(lines, { isExpress: input.isExpress, expressRatePct, discount: input.discount as DiscountInput });
-    checkDiscount(user, totals.discountPct, settings.agentMaxDiscountPct);
-    if (input.deposit && input.deposit.amount > totals.total) fail("L'acompte dépasse le total (RG-12).");
-
     const now = new Date();
     const dueAt = input.dueAt ? new Date(input.dueAt)
       : computeDueAt(now, { isExpress: input.isExpress, standardHours: settings.standardDelayHours, expressHours: settings.expressDelayHours });
 
     try {
       const created = await db.transaction(async (tx) => {
+        const { lines, moves, onlyForfaits } = await resolveLines(tx, input.customerId, input.lines, settings.kiloPrice);
+        const expressRatePct = input.isExpress ? settings.expressRatePct : 0;
+        const totals = computeOrderTotals(lines, { isExpress: input.isExpress, expressRatePct, discount: input.discount as DiscountInput });
+        checkDiscount(user, totals.discountPct, settings.agentMaxDiscountPct);
+        if (input.deposit && input.deposit.amount > totals.total) fail("L'acompte dépasse le total (RG-12).");
+        // Vente de forfait seule : rien à traiter à l'atelier, elle se règle tout de suite et se clôt aussitôt.
+        if (onlyForfaits && (input.deposit?.amount ?? 0) < totals.total) fail("Un forfait se règle à l'achat : encaissez la totalité.");
         let sessionId: string | null = null;
         if (input.deposit) {
           const s = await openSessionOf(tx, user.id);
@@ -114,13 +94,12 @@ export async function createOrder(raw: CreateOrderInput) {
           notes: input.notes,
           idempotencyKey: input.idempotencyKey,
           createdBy: user.id,
+          ...(onlyForfaits ? { status: "RETIREE" as const, readyAt: now, collectedAt: now, collectedBy: user.id } : {}),
         }).returning({ id: orders.id, number: orders.number });
-        await tx.insert(orderItems).values(lines.map((l) => ({
-          orderId: o.id, lineNo: l.lineNo, itemTypeId: l.itemTypeId, serviceId: l.serviceId,
-          itemLabel: l.itemLabel, serviceLabel: l.serviceLabel, unitPrice: l.unitPrice, quantity: l.quantity,
-          lineTotal: l.unitPrice * l.quantity, color: l.color, brand: l.brand, observations: l.observations,
-        })));
+        await tx.insert(orderItems).values(itemRows(o.id, lines));
+        await recordMoves(tx, input.customerId, o.id, user.id, moves);
         await tx.insert(orderStatusHistory).values({ orderId: o.id, fromStatus: null, toStatus: "DEPOSEE", changedBy: user.id });
+        if (onlyForfaits) await tx.insert(orderStatusHistory).values({ orderId: o.id, fromStatus: "DEPOSEE", toStatus: "RETIREE", changedBy: user.id, reason: "Vente de forfait" });
         if (input.deposit && sessionId) {
           await tx.insert(payments).values({
             orderId: o.id, cashSessionId: sessionId, method: input.deposit.method, amount: input.deposit.amount,
@@ -152,6 +131,7 @@ const updateOrderSchema = z.object({
   lines: z.array(z.object({
     id: z.uuid(),
     quantity: z.number().int().min(1).max(999),
+    description: optText,
     color: optText,
     brand: optText,
     observations: optText,
@@ -172,8 +152,9 @@ export async function updateOrder(raw: z.input<typeof updateOrderSchema>) {
       const current = await tx.select().from(orderItems).where(eq(orderItems.orderId, o.id));
       const lines = current.map((l) => {
         const u = input.lines.find((x) => x.id === l.id);
-        return u ? { ...l, quantity: u.quantity, color: u.color, brand: u.brand, observations: u.observations } : l;
-      });
+        // Le poids et les forfaits ne se modifient pas ici (ils ont déjà joué sur le solde du client).
+        return u ? { ...l, quantity: l.kind === "PIECE" ? u.quantity : l.quantity, description: u.description, color: u.color, brand: u.brand, observations: u.observations } : l;
+      }).map((l) => ({ ...l, noSurcharge: l.kind === "FORFAIT" }));
       // Le taux express déjà figé est conservé ; sinon on prend le taux courant.
       const expressRatePct = input.isExpress ? (o.isExpress ? o.expressRatePct : settings.expressRatePct) : 0;
       const totals = computeOrderTotals(lines, { isExpress: input.isExpress, expressRatePct, discount: input.discount as DiscountInput });
@@ -181,7 +162,7 @@ export async function updateOrder(raw: z.input<typeof updateOrderSchema>) {
       if (totals.total < o.amountPaid) fail("Le nouveau total serait inférieur au montant déjà payé.");
       for (const l of lines) {
         await tx.update(orderItems).set({
-          quantity: l.quantity, lineTotal: l.unitPrice * l.quantity, color: l.color, brand: l.brand, observations: l.observations,
+          quantity: l.quantity, lineTotal: l.unitPrice * l.quantity, description: l.description, color: l.color, brand: l.brand, observations: l.observations,
         }).where(eq(orderItems.id, l.id));
       }
       await tx.update(orders).set({
@@ -290,6 +271,7 @@ export async function cancelOrder(raw: { orderId: string; reason: string }) {
       await tx.update(orders).set({ status: "ANNULEE", cancelledAt: now, cancelledBy: user.id, cancelReason: reason, updatedAt: now })
         .where(eq(orders.id, o.id));
       await tx.insert(orderStatusHistory).values({ orderId: o.id, fromStatus: o.status, toStatus: "ANNULEE", reason, changedBy: user.id });
+      await reverseMoves(tx, o.id, user.id, o.number);
     });
     revalidatePath("/", "layout");
     return undefined;

@@ -7,7 +7,7 @@ export type Settings = typeof settings.$inferSelect;
 
 const DEFAULTS: Settings = {
   id: 1, shopName: "Continental Pressing", address: "", phones: "", ticketFooter: "", website: "https://continentalmarket237.com/", paperFormat: "THERMAL_80",
-  standardDelayHours: 48, expressDelayHours: 24, expressRatePct: 50, abandonedAfterDays: 30, agentMaxDiscountPct: 10,
+  standardDelayHours: 48, expressDelayHours: 24, expressRatePct: 50, abandonedAfterDays: 30, agentMaxDiscountPct: 10, kiloPrice: 0,
   createdAt: new Date(0), updatedAt: new Date(0),
 };
 

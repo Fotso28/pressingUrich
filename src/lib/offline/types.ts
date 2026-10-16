@@ -8,7 +8,7 @@ export type OfflineCustomer = { id: string; fullName: string; phone: string; sea
 
 export type OfflineItem = {
   itemLabel: string; serviceLabel: string; unitPrice: number; quantity: number; lineTotal: number;
-  color: string | null; brand: string | null; observations: string | null;
+  color: string | null; brand: string | null; observations: string | null; description?: string | null;
 };
 
 export type OfflineOrder = {
@@ -38,7 +38,7 @@ export type Snapshot = {
   catalog: {
     items: { id: string; name: string; isFrequent: boolean }[];
     services: { id: string; name: string; shortName: string }[];
-    prices: { itemTypeId: string; serviceId: string; amount: number }[];
+    prices: { itemTypeId: string; serviceId: string; amount: number; maxAmount: number | null }[];
   };
   customers: OfflineCustomer[];
   orders: OfflineOrder[];
@@ -52,7 +52,7 @@ export type OfflineOp =
   | (Base & { type: "CREATE_CUSTOMER"; id: string; fullName: string; phone: string })
   | (Base & {
       type: "CREATE_ORDER"; id: string; number: number; customerId: string; isExpress: boolean; dueAt: string; notes: string | null;
-      lines: { itemTypeId: string; serviceId: string; quantity: number; color: string | null; brand: string | null; observations: string | null }[];
+      lines: { itemTypeId: string; serviceId: string; quantity: number; unitPrice?: number | null; description?: string | null; color: string | null; brand: string | null; observations: string | null }[];
       deposit: { paymentId: string; sessionId: string; amount: number; method: Method; reference: string | null } | null;
     })
   | (Base & { type: "ADD_PAYMENT"; paymentId: string; orderId: string; sessionId: string; amount: number; method: Method; reference: string | null })

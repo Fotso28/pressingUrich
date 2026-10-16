@@ -65,7 +65,7 @@ export async function salesBetween(from: Date, to: Date) {
 }
 
 export type MoneyOut = {
-  id: string; source: "SORTIE" | "CAISSE"; at: Date; category: OutflowCategory; label: string; amount: number; method: string;
+  id: string; source: "SORTIE" | "CAISSE"; at: Date; createdAt: Date; category: OutflowCategory; label: string; amount: number; method: string;
   beneficiary: string | null; beneficiaryUserId: string | null; salaryPeriod: string | null; notes: string | null; by: string | null; voided: boolean; voidReason: string | null;
 };
 
@@ -73,16 +73,16 @@ export type MoneyOut = {
 export async function listMoneyOut(from: Date, to: Date): Promise<MoneyOut[]> {
   const [o, e] = await Promise.all([
     db.select({ x: outflows, by: user.name }).from(outflows).leftJoin(user, eq(user.id, outflows.createdBy))
-      .where(and(gte(outflows.occurredAt, from), lt(outflows.occurredAt, to))).orderBy(desc(outflows.occurredAt)),
+      .where(and(gte(outflows.occurredAt, from), lt(outflows.occurredAt, to))).orderBy(desc(outflows.createdAt)),
     db.select({ x: expenses, by: user.name }).from(expenses).leftJoin(user, eq(user.id, expenses.createdBy))
       .where(and(gte(expenses.createdAt, from), lt(expenses.createdAt, to))).orderBy(desc(expenses.createdAt)),
   ]);
   return [
-    ...o.map(({ x, by }) => ({ id: x.id, source: "SORTIE" as const, at: x.occurredAt, category: x.category, label: x.label, amount: x.amount, method: x.method,
+    ...o.map(({ x, by }) => ({ id: x.id, source: "SORTIE" as const, at: x.occurredAt, createdAt: x.createdAt, category: x.category, label: x.label, amount: x.amount, method: x.method,
       beneficiary: x.beneficiary, beneficiaryUserId: x.beneficiaryUserId, salaryPeriod: x.salaryPeriod, notes: x.notes, by, voided: !!x.voidedAt, voidReason: x.voidReason })),
-    ...e.map(({ x, by }) => ({ id: x.id, source: "CAISSE" as const, at: x.createdAt, category: expenseToOutflowCategory(x.category), label: x.label, amount: x.amount, method: x.method,
+    ...e.map(({ x, by }) => ({ id: x.id, source: "CAISSE" as const, at: x.createdAt, createdAt: x.createdAt, category: expenseToOutflowCategory(x.category), label: x.label, amount: x.amount, method: x.method,
       beneficiary: null, beneficiaryUserId: null, salaryPeriod: null, notes: null, by, voided: !!x.voidedAt, voidReason: x.voidReason })),
-  ].sort((a, b) => b.at.getTime() - a.at.getTime());
+  ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 export type SalaryStaff = { id: string; name: string; role: string; monthlySalary: number | null; lastAmount: number | null; lastPeriod: string | null };
@@ -90,7 +90,7 @@ export type SalaryStaff = { id: string; name: string; role: string; monthlySalar
 /** Employés payables : les comptes utilisateurs actifs, avec leur dernier salaire pour préremplir le montant. */
 export async function salaryStaff(): Promise<SalaryStaff[]> {
   const [staff, last] = await Promise.all([
-    db.select({ id: user.id, name: user.name, role: user.role, monthlySalary: user.monthlySalary }).from(user).where(sql`coalesce(${user.banned}, false) = false`).orderBy(asc(user.name)),
+    db.select({ id: user.id, name: user.name, role: user.role, monthlySalary: user.monthlySalary }).from(user).where(sql`coalesce(${user.banned}, false) = false`).orderBy(desc(user.createdAt)),
     db.selectDistinctOn([outflows.beneficiaryUserId], { userId: outflows.beneficiaryUserId, amount: outflows.amount, period: outflows.salaryPeriod }).from(outflows)
       .where(and(eq(outflows.category, "SALAIRES"), isNotNull(outflows.beneficiaryUserId), isNull(outflows.voidedAt)))
       .orderBy(outflows.beneficiaryUserId, desc(outflows.occurredAt)),
@@ -127,9 +127,9 @@ export function monthBounds(key: string): { from: Date; to: Date } {
 /** Salaires dus pour un mois de salaire (« 2026-10 »), quelle que soit la date du paiement. */
 export async function salariesForPeriod(period: string): Promise<MoneyOut[]> {
   const rows = await db.select({ x: outflows, by: user.name }).from(outflows).leftJoin(user, eq(user.id, outflows.createdBy))
-    .where(and(eq(outflows.category, "SALAIRES"), eq(outflows.salaryPeriod, period), isNull(outflows.voidedAt))).orderBy(desc(outflows.occurredAt));
+    .where(and(eq(outflows.category, "SALAIRES"), eq(outflows.salaryPeriod, period), isNull(outflows.voidedAt))).orderBy(desc(outflows.createdAt));
   return rows.map(({ x, by }) => ({
-    id: x.id, source: "SORTIE" as const, at: x.occurredAt, category: x.category, label: x.label, amount: x.amount, method: x.method,
+    id: x.id, source: "SORTIE" as const, at: x.occurredAt, createdAt: x.createdAt, category: x.category, label: x.label, amount: x.amount, method: x.method,
     beneficiary: x.beneficiary, beneficiaryUserId: x.beneficiaryUserId, salaryPeriod: x.salaryPeriod, notes: x.notes, by, voided: false, voidReason: null,
   }));
 }

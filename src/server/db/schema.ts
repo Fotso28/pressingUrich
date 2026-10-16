@@ -103,6 +103,8 @@ export const settings = pgTable("settings", {
   expressRatePct: integer("express_rate_pct").notNull().default(50),
   abandonedAfterDays: integer("abandoned_after_days").notNull().default(30),
   agentMaxDiscountPct: integer("agent_max_discount_pct").notNull().default(10),
+  /** Linge au kilo hors forfait : prix d'un kilo (0 = seulement avec un forfait). */
+  kiloPrice: integer("kilo_price").notNull().default(0),
   ...timestamps,
 });
 
@@ -127,7 +129,9 @@ export const prices = pgTable("prices", {
   id: uuid("id").primaryKey().defaultRandom(),
   itemTypeId: uuid("item_type_id").notNull().references(() => itemTypes.id),
   serviceId: uuid("service_id").notNull().references(() => services.id),
-  amount: integer("amount").notNull(), // FCFA
+  amount: integer("amount").notNull(), // FCFA (prix minimal si le prix est variable)
+  /** Prix variable : prix maximal (le prix se choisit au dépôt entre amount et maxAmount). Null = prix fixe. */
+  maxAmount: integer("max_amount"),
   active: boolean("active").notNull().default(true),
   ...timestamps,
 }, (t) => [uniqueIndex("prices_item_service_uq").on(t.itemTypeId, t.serviceId)]);
@@ -183,8 +187,13 @@ export const orderItems = pgTable("order_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   orderId: uuid("order_id").notNull().references(() => orders.id),
   lineNo: integer("line_no").notNull(), // 1, 2, 3… pour l'étiquette
-  itemTypeId: uuid("item_type_id").notNull().references(() => itemTypes.id),
-  serviceId: uuid("service_id").notNull().references(() => services.id),
+  /** PIECE (article du catalogue), KILO (linge pesé) ou FORFAIT (achat d'un forfait au kilo). */
+  kind: text("kind").notNull().default("PIECE"),
+  itemTypeId: uuid("item_type_id").references(() => itemTypes.id), // PIECE seulement
+  serviceId: uuid("service_id").references(() => services.id), // PIECE seulement
+  forfaitId: uuid("forfait_id").references(() => forfaits.id), // FORFAIT seulement
+  weightGrams: integer("weight_grams"), // KILO : poids déposé ; FORFAIT : poids acheté
+  description: text("description"), // courte description saisie au dépôt
   itemLabel: text("item_label").notNull(), // copie figée
   serviceLabel: text("service_label").notNull(),
   unitPrice: integer("unit_price").notNull(), // prix figé
@@ -283,6 +292,32 @@ export const outflows = pgTable("outflows", {
   index("outflows_category_idx").on(t.category),
   index("outflows_beneficiary_user_idx").on(t.beneficiaryUserId),
 ]);
+
+// ---------------------------------------------------------------------------
+// Forfaits au kilo
+// ---------------------------------------------------------------------------
+
+/** Forfaits proposés aux clients : un prix pour un poids de linge (ex. 20 000 FCFA = 23 kg). */
+export const forfaits = pgTable("forfaits", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  price: integer("price").notNull(),
+  grams: integer("grams").notNull(),
+  active: boolean("active").notNull().default(true),
+  ...timestamps,
+});
+
+/** Mouvements du solde forfait d'un client, en grammes : achat (+), consommation (−), annulation (inverse). */
+export const forfaitMoves = pgTable("forfait_moves", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  customerId: uuid("customer_id").notNull().references(() => customers.id),
+  orderId: uuid("order_id").references(() => orders.id),
+  kind: text("kind").notNull(), // ACHAT | CONSO | ANNULATION
+  grams: integer("grams").notNull(),
+  label: text("label").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("forfait_moves_customer_idx").on(t.customerId, t.createdAt)]);
 
 /** Paires clé/valeur techniques (ex. version du jeu de démonstration). */
 export const appMeta = pgTable("app_meta", {

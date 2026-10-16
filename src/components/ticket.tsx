@@ -1,3 +1,4 @@
+import { formatKg } from "@/lib/domain/kilo";
 import type { OrderDetail } from "@/server/queries/orders";
 import type { Settings } from "@/server/queries/settings";
 import { formatAmount } from "@/lib/domain/money";
@@ -38,7 +39,8 @@ export function Ticket({ o, s, kind = "ticket", agentName }: { o: OrderDetail; s
       <hr />
       {o.items.map((i) => (
         <div key={i.id}>
-          <div className="r"><span>{i.quantity} x {i.itemLabel}  {i.serviceLabel}</span><span>{formatAmount(i.lineTotal)}</span></div>
+          <div className="r"><span>{i.kind === "PIECE" ? `${i.quantity} x ${i.itemLabel}  ${i.serviceLabel}` : i.kind === "KILO" ? `${i.itemLabel} ${formatKg(i.weightGrams ?? 0)}  ${i.serviceLabel}` : i.itemLabel}</span><span>{formatAmount(i.lineTotal)}</span></div>
+          {i.description && <div className="muted">    {i.description}</div>}
           {(i.color || i.brand) && <div className="muted">    {[i.color, i.brand].filter(Boolean).join(" · ")}</div>}
           {i.observations && <div className="muted">    Obs : {i.observations}</div>}
         </div>

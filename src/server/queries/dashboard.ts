@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, count, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import { customers, orders, payments, user } from "../db/schema";
 import { periodStart } from "@/lib/domain/dates";
@@ -47,20 +47,20 @@ const orderBrief = {
 export async function lateOrders(limit = 8) {
   return db.select(orderBrief).from(orders).innerJoin(customers, eq(customers.id, orders.customerId))
     .where(and(inArray(orders.status, ["DEPOSEE", "EN_TRAITEMENT"]), lt(orders.dueAt, new Date())))
-    .orderBy(asc(orders.dueAt)).limit(limit);
+    .orderBy(desc(orders.createdAt)).limit(limit);
 }
 
 export async function unpaidOrders(limit = 100) {
   return db.select(orderBrief).from(orders).innerJoin(customers, eq(customers.id, orders.customerId))
     .where(and(sql`${orders.status} <> 'ANNULEE'`, sql`${orders.total} > ${orders.amountPaid}`))
-    .orderBy(desc(sql`${orders.total} - ${orders.amountPaid}`)).limit(limit);
+    .orderBy(desc(orders.createdAt)).limit(limit);
 }
 
 export async function abandonedOrders(limit = 100) {
   const s = await getSettings();
   return db.select(orderBrief).from(orders).innerJoin(customers, eq(customers.id, orders.customerId))
     .where(and(eq(orders.status, "PRETE"), lt(orders.readyAt, new Date(Date.now() - s.abandonedAfterDays * 86_400_000))))
-    .orderBy(asc(orders.readyAt)).limit(limit);
+    .orderBy(desc(orders.createdAt)).limit(limit);
 }
 
 export async function todaysOrders(limit = 10) {

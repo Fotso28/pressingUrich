@@ -50,6 +50,13 @@
       "when": 1792122793846,
       "tag": "0006_monthly_salary",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792164609040,
+      "tag": "0007_kilo_forfaits",
+      "breakpoints": true
     }
   ]
 }

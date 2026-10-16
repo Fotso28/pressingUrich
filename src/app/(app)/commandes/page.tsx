@@ -6,8 +6,12 @@ import { PageHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { OrdersTable } from "./orders-table";
 import { cn } from "@/lib/cn";
-import { fromDateTimeLocal } from "@/lib/domain/dates";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
+import { eq } from "drizzle-orm";
+import { db } from "@/server/db";
+import { customers } from "@/server/db/schema";
+import { PeriodFilter } from "@/components/filters/period-filter";
+import { dayKey, lastMonths, resolvePeriod } from "@/lib/domain/period";
 
 export const metadata = { title: "Commandes" };
 
@@ -19,7 +23,7 @@ const TABS: { key: OrdersTab; label: string }[] = [
   { key: "toutes", label: "Toutes" },
 ];
 
-type SP = { tab?: string; retard?: string; impaye?: string; du?: string; au?: string; page?: string };
+type SP = { tab?: string; retard?: string; impaye?: string; client?: string; periode?: string; jour?: string; mois?: string; du?: string; au?: string; page?: string };
 
 function qs(base: SP, patch: Partial<SP>) {
   const p = new URLSearchParams();
@@ -32,14 +36,17 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const user = await pageUser();
   const sp = await searchParams;
   const tab = (TABS.some((t) => t.key === sp.tab) ? sp.tab : "a-traiter") as OrdersTab;
-  const from = sp.du ? fromDateTimeLocal(`${sp.du}T00:00`) : undefined;
-  const to = sp.au ? new Date(fromDateTimeLocal(`${sp.au}T00:00`).getTime() + 86_400_000) : undefined;
-  const [counts, data, settings] = await Promise.all([
-    countByTab(),
-    listOrders({ tab, late: sp.retard === "1", unpaid: sp.impaye === "1", from: from && !isNaN(+from) ? from : undefined, to: to && !isNaN(+to) ? to : undefined, page: Number(sp.page) || 1 }),
+  // Période de dépôt (jour, mois, période personnalisée) et client : mêmes filtres pour la liste et les compteurs.
+  const period = resolvePeriod(sp);
+  const customerId = sp.client && /^[0-9a-f-]{36}$/i.test(sp.client) ? sp.client : undefined;
+  const filters = { late: sp.retard === "1", unpaid: sp.impaye === "1", from: period?.from, to: period?.to, customerId };
+  const [counts, data, settings, client] = await Promise.all([
+    countByTab(filters),
+    listOrders({ tab, ...filters, page: Number(sp.page) || 1 }),
     getSettings(),
+    customerId ? db.select({ id: customers.id, fullName: customers.fullName }).from(customers).where(eq(customers.id, customerId)).limit(1).then((r) => r[0] ?? null) : null,
   ]);
-  const base: SP = { tab, retard: sp.retard, impaye: sp.impaye, du: sp.du, au: sp.au };
+  const base: SP = { tab, retard: sp.retard, impaye: sp.impaye, client: customerId, periode: sp.periode, jour: sp.jour, mois: sp.mois, du: sp.du, au: sp.au };
   const chip = (active: boolean) => cn("inline-flex h-9 items-center rounded-full border px-3.5 text-sm font-medium transition",
     active ? "border-brand bg-brand-50 text-brand" : "border-line-2 bg-surface text-ink-2 hover:bg-subtle");
 
@@ -61,25 +68,24 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         </nav>
       </div>
 
-      <form className="mb-5 flex flex-wrap items-center gap-2" action="/commandes">
-        <input type="hidden" name="tab" value={tab} />
+      {client && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-ink-3">Commandes de</span>
+          <Link href={`/clients/${client.id}`} className="font-semibold text-brand">{client.fullName}</Link>
+          <Link href={qs({ ...base, client: undefined, page: undefined }, {})} className="inline-flex items-center gap-1 rounded-full border border-line-2 px-2.5 py-1 text-ink-2 hover:bg-subtle"><X className="size-3.5" />Tous les clients</Link>
+        </div>
+      )}
+      <div className="mb-5 flex flex-wrap items-center gap-2">
         {/* « En retard » n'a de sens que pour les commandes encore à l'atelier. */}
         {(tab === "a-traiter" || tab === "toutes") && <Link href={qs(base, { retard: sp.retard === "1" ? undefined : "1", page: undefined })} className={chip(sp.retard === "1")}>En retard</Link>}
         <Link href={qs(base, { impaye: sp.impaye === "1" ? undefined : "1", page: undefined })} className={chip(sp.impaye === "1")}>Impayées</Link>
         <span className="mx-1 hidden h-6 w-px bg-line sm:block" />
-        {sp.retard && <input type="hidden" name="retard" value="1" />}
-        {sp.impaye && <input type="hidden" name="impaye" value="1" />}
-        <label className="flex items-center gap-2 text-sm text-ink-3">Du
-          <input type="date" name="du" defaultValue={sp.du} className="h-9 rounded-md border border-line-2 bg-surface px-2 text-sm text-ink tnum" />
-        </label>
-        <label className="flex items-center gap-2 text-sm text-ink-3">au
-          <input type="date" name="au" defaultValue={sp.au} className="h-9 rounded-md border border-line-2 bg-surface px-2 text-sm text-ink tnum" />
-        </label>
-        <Button type="submit" size="sm" variant="secondary">Filtrer</Button>
-        {(sp.retard || sp.impaye || sp.du || sp.au) && <Link href={qs({ tab }, {})} className="text-sm font-medium text-brand">Effacer</Link>}
-      </form>
+        <PeriodFilter mode={period?.mode ?? null} jour={period?.jour} mois={period?.mois} du={period?.du} au={period?.au} months={lastMonths(24)} today={dayKey()} />
+        {(sp.retard || sp.impaye || period || customerId) && <Link href={qs({ tab }, {})} className="text-sm font-medium text-brand">Effacer les filtres</Link>}
+      </div>
+      {period && <p className="-mt-2 mb-4 text-sm text-ink-3">Déposées : <span className="font-medium text-ink first-letter:uppercase">{period.label}</span></p>}
 
-      <OrdersTable rows={data.rows} tab={tab} abandonedAfterDays={settings.abandonedAfterDays} isAdmin={user.role === "ADMIN"} />
+      <OrdersTable rows={data.rows} tab={tab} abandonedAfterDays={settings.abandonedAfterDays} shopName={settings.shopName} isAdmin={user.role === "ADMIN"} />
 
       {data.pages > 1 && (
         <div className="mt-5 flex items-center justify-between text-sm text-ink-3">

@@ -21,11 +21,12 @@ export function applyOp(s: State, op: OfflineOp): void {
       const c = s.customers.find((x) => x.id === op.customerId);
       const items = op.lines.map((l) => {
         const p = s.catalog.prices.find((x) => x.itemTypeId === l.itemTypeId && x.serviceId === l.serviceId);
-        const unitPrice = p?.amount ?? 0;
+        // Prix variable : le prix choisi au dépôt, borné comme sur le serveur.
+        const unitPrice = p?.maxAmount != null && l.unitPrice != null ? Math.min(p.maxAmount, Math.max(p.amount, l.unitPrice)) : (p?.amount ?? 0);
         return {
           itemLabel: s.catalog.items.find((i) => i.id === l.itemTypeId)?.name ?? "Article",
           serviceLabel: s.catalog.services.find((x) => x.id === l.serviceId)?.shortName ?? "",
-          unitPrice, quantity: l.quantity, lineTotal: unitPrice * l.quantity, color: l.color, brand: l.brand, observations: l.observations,
+          unitPrice, quantity: l.quantity, lineTotal: unitPrice * l.quantity, description: l.description ?? null, color: l.color, brand: l.brand, observations: l.observations,
         };
       });
       const rate = op.isExpress ? s.settings.expressRatePct : 0;
