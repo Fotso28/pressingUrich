@@ -24,7 +24,6 @@ export default async function NewDepositPage({ searchParams }: { searchParams: P
       catalog={catalog}
       draftKey={`cp-depot-brouillon:${user.id}`}
       forfaits={forfaits.filter((f) => f.active).sort((a, b) => a.grams - b.grams).map(({ id, name, price, grams }) => ({ id, name, price, grams }))}
-      kiloPrice={settings.kiloPrice}
       initialCustomer={initialCustomer}
       hasOpenSession={!!session}
       isAdmin={user.role === "ADMIN"}

@@ -1,3 +1,5 @@
+import { kiloLinePrice } from "@/lib/domain/kilo";
+import { formatAmount } from "@/lib/domain/money";
 import { computeOrderTotals } from "@/lib/domain/totals";
 import { METHODS } from "@/lib/domain/cash";
 import { formatOrderNumber } from "@/lib/domain/order-number";
@@ -20,6 +22,13 @@ export function applyOp(s: State, op: OfflineOp): void {
     case "CREATE_ORDER": {
       const c = s.customers.find((x) => x.id === op.customerId);
       const items = op.lines.map((l) => {
+        if (l.kind === "KILO") {
+          // Linge au kilo hors ligne : prix du kilo du type de linge (le solde forfait n'est pas utilisé).
+          const k = s.catalog.kiloTypes?.find((x) => x.id === l.kiloTypeId);
+          const price = kiloLinePrice(l.grams, k?.pricePerKg ?? 0);
+          return { kind: "KILO", weightGrams: l.grams, itemLabel: k?.name ?? "Linge au kilo", serviceLabel: `${formatAmount(k?.pricePerKg ?? 0)}/kg`,
+            unitPrice: price, quantity: 1, lineTotal: price, description: l.description, color: null, brand: null, observations: null };
+        }
         const p = s.catalog.prices.find((x) => x.itemTypeId === l.itemTypeId && x.serviceId === l.serviceId);
         // Prix variable : le prix choisi au dépôt, borné comme sur le serveur.
         const unitPrice = p?.maxAmount != null && l.unitPrice != null ? Math.min(p.maxAmount, Math.max(p.amount, l.unitPrice)) : (p?.amount ?? 0);

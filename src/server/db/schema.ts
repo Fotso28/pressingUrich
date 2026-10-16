@@ -192,6 +192,7 @@ export const orderItems = pgTable("order_items", {
   itemTypeId: uuid("item_type_id").references(() => itemTypes.id), // PIECE seulement
   serviceId: uuid("service_id").references(() => services.id), // PIECE seulement
   forfaitId: uuid("forfait_id").references(() => forfaits.id), // FORFAIT seulement
+  kiloTypeId: uuid("kilo_type_id").references(() => kiloTypes.id), // KILO : type de linge (prix au kg)
   weightGrams: integer("weight_grams"), // KILO : poids déposé ; FORFAIT : poids acheté
   description: text("description"), // courte description saisie au dépôt
   itemLabel: text("item_label").notNull(), // copie figée
@@ -296,6 +297,16 @@ export const outflows = pgTable("outflows", {
 // ---------------------------------------------------------------------------
 // Forfaits au kilo
 // ---------------------------------------------------------------------------
+
+/** Linge au kilo : types de linge et prix du kilo (ex. linge ordinaire, linge blanc, draps). */
+export const kiloTypes = pgTable("kilo_types", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  pricePerKg: integer("price_per_kg").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  ...timestamps,
+});
 
 /** Forfaits proposés aux clients : un prix pour un poids de linge (ex. 20 000 FCFA = 23 kg). */
 export const forfaits = pgTable("forfaits", {

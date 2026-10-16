@@ -34,7 +34,7 @@ import { normalizeName, normalizePhone } from "../src/lib/domain/normalize";
 
 const TZ = "Africa/Douala";
 const START = process.env.DEMO_START ?? "2025-11-01";
-const DEMO_VERSION = "7";
+const DEMO_VERSION = "8";
 // Charges fixes mensuelles (FCFA)
 const RENT = 75_000, WATER = 15_000, TV = 5_000;
 const RENT_EVERY = 3; // loyer payé par trimestre, le premier mois du trimestre
@@ -177,6 +177,7 @@ async function main() {
   if (!catalog.length) throw new Error("Catalogue vide : lancez d'abord `pnpm db:seed`.");
   const items = [...new Set(catalog.map((c) => c.item))];
   const forfaits = (await db.select().from(s.forfaits).where(eq(s.forfaits.active, true))).sort((a, b) => a.grams - b.grams);
+  const kiloTypes = (await db.select().from(s.kiloTypes).where(eq(s.kiloTypes.active, true))).sort((a, b) => a.sortOrder - b.sortOrder);
 
   await db.update(s.settings).set({ shopName: "Continental Pressing", address: "Logpom, Douala" })
     .where(and(eq(s.settings.id, 1), eq(s.settings.address, "Douala")));
@@ -328,21 +329,29 @@ async function main() {
 
         // Articles : à la pièce, ou linge au kilo pour les clients au forfait (achat d'un forfait quand le solde ne suffit plus).
         const id = randomUUID();
-        const kiloOrder = c.kilo && chance(0.85);
+        // Linge au kilo : surtout les clients au forfait, parfois les autres (payé au prix du kilo).
+        const kiloOrder = kiloTypes.length > 0 && (c.kilo ? chance(0.85) : chance(0.04));
         const lines: { cat: (typeof catalog)[number]; qty: number; price: number; description: string | null }[] = [];
         const special: Omit<typeof s.orderItems.$inferInsert, "orderId" | "lineNo">[] = [];
         let forfaitPrice = 0;
         if (kiloOrder) {
           const grams = int(30, 120) * 100;
-          if (c.balance < grams) {
+          const kt = weighted(kiloTypes, (k) => (k.sortOrder === 0 ? 60 : 15));
+          if (c.kilo && c.balance < grams) {
             const f = weighted(forfaits, (x) => (x.grams === 23_000 ? 60 : 20));
             c.balance += f.grams; forfaitPrice = f.price;
             special.push({ kind: "FORFAIT", forfaitId: f.id, weightGrams: f.grams, itemLabel: f.name, serviceLabel: "Forfait", unitPrice: f.price, quantity: 1, lineTotal: f.price });
             moves.push({ customerId: c.id, orderId: id, kind: "ACHAT", grams: f.grams, label: `Achat ${f.name}`, createdBy: "", createdAt: when });
           }
-          c.balance -= grams;
-          special.push({ kind: "KILO", weightGrams: grams, itemLabel: "Linge au kilo", serviceLabel: "Forfait", unitPrice: 0, quantity: 1, lineTotal: 0, description: chance(0.5) ? pick(KILO_DESCRIPTIONS) : null });
-          moves.push({ customerId: c.id, orderId: id, kind: "CONSO", grams: -grams, label: `Linge au kilo (${(grams / 1000).toLocaleString("fr-FR")} kg)`, createdBy: "", createdAt: when });
+          const description = chance(0.5) ? pick(KILO_DESCRIPTIONS) : null;
+          if (c.kilo) {
+            c.balance -= grams;
+            special.push({ kind: "KILO", kiloTypeId: kt.id, weightGrams: grams, itemLabel: kt.name, serviceLabel: "Forfait", unitPrice: 0, quantity: 1, lineTotal: 0, description });
+            moves.push({ customerId: c.id, orderId: id, kind: "CONSO", grams: -grams, label: `${kt.name} (${(grams / 1000).toLocaleString("fr-FR")} kg)`, createdBy: "", createdAt: when });
+          } else {
+            const price = Math.ceil((grams / 1000) * kt.pricePerKg / 100) * 100;
+            special.push({ kind: "KILO", kiloTypeId: kt.id, weightGrams: grams, itemLabel: kt.name, serviceLabel: `${kt.pricePerKg.toLocaleString("fr-FR")}/kg`, unitPrice: price, quantity: 1, lineTotal: price, description });
+          }
         } else {
           const nLines = weighted([1, 2, 3, 4, 5], (k) => [30, 32, 22, 11, 5][k - 1]);
           const chosen = new Set<string>();
@@ -359,7 +368,7 @@ async function main() {
             lines.push({ cat: opt, qty, price, description: chance(0.3) ? pick(DESCRIPTIONS) : null });
           }
         }
-        const subtotal = lines.reduce((a, l) => a + l.price * l.qty, 0) + forfaitPrice;
+        const subtotal = lines.reduce((a, l) => a + l.price * l.qty, 0) + special.reduce((a, l) => a + (l.lineTotal as number), 0);
         const isExpress = !kiloOrder && chance(0.09);
         const expressAmount = isExpress ? Math.ceil((subtotal * 0.5) / 100) * 100 : 0; // comme computeOrderTotals
         // Geste commercial pour les fidèles : remise ronde de 500 ou 1 000 FCFA.

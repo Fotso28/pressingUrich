@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import { expenses, outflows, payments, user } from "../db/schema";
 import { TZDate } from "@date-fns/tz";

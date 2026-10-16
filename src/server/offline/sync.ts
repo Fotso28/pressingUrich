@@ -79,7 +79,7 @@ async function apply(tx: Tx, u: Snapshot["user"], op: z.infer<typeof opSchema>):
     }
     case "CREATE_ORDER": {
       const settings = await getSettings();
-      const { lines, moves } = await resolveLines(tx, op.customerId, op.lines, settings.kiloPrice);
+      const { lines, moves } = await resolveLines(tx, op.customerId, op.lines);
       const expressRatePct = op.isExpress ? settings.expressRatePct : 0;
       const totals = computeOrderTotals(lines, { isExpress: op.isExpress, expressRatePct, discount: null });
       if (op.deposit && op.deposit.amount > totals.total) fail("L'acompte dépasse le total.");

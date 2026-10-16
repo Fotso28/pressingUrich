@@ -97,7 +97,7 @@ test.describe.serial("Parcours du comptoir", () => {
     await expect(page.getByText("Retirée", { exact: true }).first()).toBeVisible();
   });
 
-  test("linge au kilo : achat d'un forfait puis consommation du solde", async ({ page }) => {
+  test("linge au kilo : prix du kilo selon le type, puis forfait déduit en priorité", async ({ page }) => {
     await login(page, AGENT, AGENT_PASSWORD);
     await page.goto("/depot/nouveau");
     await page.getByRole("button", { name: "Nouveau client" }).click();
@@ -105,20 +105,31 @@ test.describe.serial("Parcours du comptoir", () => {
     await dlg.getByLabel("Nom complet").fill("Client Forfait Test");
     await dlg.getByLabel("Téléphone").fill(`6${String(Date.now() + 7).slice(-8)}`);
     await dlg.getByRole("button", { name: "Créer le client" }).click();
+    // Sans forfait : 2,5 kg de linge blanc à 1 200 FCFA/kg = 3 000.
+    await page.getByRole("tab", { name: "Au kilo" }).click();
+    await page.getByRole("button", { name: /Linge blanc/ }).click();
+    await page.getByLabel("Poids en kg").fill("2,5");
+    await page.getByRole("button", { name: "Ajouter" }).click();
+    await expect(page.getByText("Linge blanc · 2,5 kg")).toBeVisible();
+    await expect(page.getByText(/^3[\s\u202f]?000$/).first()).toBeVisible();
+    await page.getByRole("button", { name: "Valider le dépôt" }).click();
+    await page.waitForURL(/\/depot\/confirmation\//);
+    await page.getByRole("link", { name: "Voir la commande" }).click();
+    await expect(page.getByText(/Linge blanc · 2,5 kg/)).toBeVisible();
+
+    // Nouveau dépôt du même client : il achète un forfait de 23 kg, ses 6,5 kg en sont déduits.
+    await page.getByRole("link", { name: "Client Forfait Test" }).click();
+    await page.getByRole("link", { name: /Nouveau dépôt pour ce client/ }).click();
     await page.getByRole("tab", { name: "Au kilo" }).click();
     await expect(page.getByText(/Solde forfait ·/)).toBeVisible();
+    await page.getByRole("button", { name: /^23 kg/ }).click();
     await page.getByLabel("Poids en kg").fill("6,5");
     await page.getByRole("button", { name: "Ajouter" }).click();
-    await expect(page.getByText(/Solde insuffisant : il manque 6,5 kg/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Valider le dépôt" })).toBeDisabled();
-    // Achat du forfait 23 kg dans le même dépôt : il se règle en entier.
-    await page.getByRole("button", { name: /^23 kg/ }).click();
     await expect(page.getByText("Déduit du solde forfait")).toBeVisible();
     await page.getByRole("button", { name: "Tout" }).click();
     await page.getByRole("button", { name: "Valider le dépôt" }).click();
     await page.waitForURL(/\/depot\/confirmation\//);
     await page.getByRole("link", { name: "Voir la commande" }).click();
-    await expect(page.getByText(/Linge au kilo · 6,5 kg/)).toBeVisible();
     await page.getByRole("link", { name: "Client Forfait Test" }).click();
     await expect(page.getByText("16,5 kg").first()).toBeVisible(); // 23 − 6,5
     // Toutes les commandes du client, depuis sa fiche.

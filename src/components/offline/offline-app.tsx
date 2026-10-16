@@ -20,7 +20,7 @@ import { EXPENSE_CATEGORIES, METHOD_LABEL, METHODS, type Method } from "@/lib/do
 import { formatOrderNumber } from "@/lib/domain/order-number";
 import { formatPhone, normalizeName } from "@/lib/domain/normalize";
 import { isExpired, loadState, perform, subscribe, syncNow, type OfflineState } from "@/lib/offline/store";
-import { OP_LABEL, REFILL_WHEN_LEFT, type OfflineOrder } from "@/lib/offline/types";
+import { OP_LABEL, REFILL_WHEN_LEFT, type OfflineOp, type OfflineOrder } from "@/lib/offline/types";
 import { OfflineCustomerPicker } from "./customer-picker";
 import { offlinePrintCss, useOfflinePrint } from "./offline-ticket";
 
@@ -179,12 +179,13 @@ function DepositTab({ state, onOpenCash, print }: { state: OfflineState; onOpenC
     const number = s.numbers[0];
     if (!number) return { ok: false as const, error: "Plus de numéro de ticket : connectez-vous à internet pour obtenir de nouveaux numéros." };
     if (input.deposit && !s.session) return { ok: false as const, error: "Ouvrez votre caisse avant d'encaisser un acompte." };
-    if (input.lines.some((l) => l.kind !== "PIECE")) return { ok: false as const, error: "Linge au kilo et forfaits : connexion internet nécessaire (solde du client)." };
+    if (input.lines.some((l) => l.kind === "FORFAIT")) return { ok: false as const, error: "Achat de forfait : connexion internet nécessaire." };
     const id = uuid(), at = nowIso();
     const dueAt = input.dueAt ?? computeDueAt(new Date(), { isExpress: input.isExpress, standardHours: s.settings.standardDelayHours, expressHours: s.settings.expressDelayHours }).toISOString();
     const next = await perform({
       type: "CREATE_ORDER", opId: uuid(), at, id, number, customerId: input.customerId, isExpress: input.isExpress, dueAt, notes: input.notes || null,
-      lines: input.lines.flatMap((l) => (l.kind === "PIECE" ? [{ itemTypeId: l.itemTypeId, serviceId: l.serviceId, quantity: l.quantity, unitPrice: l.unitPrice ?? null, description: l.description || null, color: l.color || null, brand: l.brand || null, observations: l.observations || null }] : [])),
+      lines: input.lines.flatMap((l): Extract<OfflineOp, { type: "CREATE_ORDER" }>["lines"] => (l.kind === "PIECE" ? [{ itemTypeId: l.itemTypeId, serviceId: l.serviceId, quantity: l.quantity, unitPrice: l.unitPrice ?? null, description: l.description || null, color: l.color || null, brand: l.brand || null, observations: l.observations || null }]
+        : l.kind === "KILO" ? [{ kind: "KILO" as const, kiloTypeId: l.kiloTypeId, grams: l.grams, useForfait: false as const, description: l.description || null }] : [])),
       deposit: input.deposit && s.session ? { paymentId: uuid(), sessionId: s.session.id, amount: input.deposit.amount, method: input.deposit.method, reference: input.deposit.reference || null } : null,
     });
     setDone(next.orders.find((o) => o.id === id) ?? null);

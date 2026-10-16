@@ -17,17 +17,18 @@ export const kiloLinePrice = (grams: number, kiloPrice: number) => Math.ceil((gr
 export type LineKind = "PIECE" | "KILO" | "FORFAIT";
 
 /**
- * Consommation des forfaits d'un dépôt : le solde du client plus les forfaits achetés dans ce dépôt couvrent
- * le linge au kilo, ligne après ligne ; le reste est facturé au prix du kilo (s'il est fixé).
+ * Linge au kilo : chaque ligne est pesée et facturée au prix du kilo de son type de linge.
+ * Si le client a un solde forfait (ou en achète un dans ce dépôt), les kilos en sont déduits d'abord
+ * (lignes avec `useForfait`), et seul le reste est facturé.
  */
-export function allocateKilo(balanceGrams: number, lines: { kind: LineKind; grams: number }[], kiloPrice: number) {
-  let balance = balanceGrams + lines.filter((l) => l.kind === "FORFAIT").reduce((a, l) => a + l.grams, 0);
+export function allocateKilo(balanceGrams: number, lines: { kind: LineKind; grams: number; pricePerKg?: number; useForfait?: boolean }[]) {
+  let balance = Math.max(0, balanceGrams) + lines.filter((l) => l.kind === "FORFAIT").reduce((a, l) => a + l.grams, 0);
   const out = lines.map((l) => {
     if (l.kind !== "KILO") return null;
-    const covered = Math.max(0, Math.min(l.grams, balance));
+    const covered = l.useForfait === false ? 0 : Math.max(0, Math.min(l.grams, balance));
     balance -= covered;
     const uncovered = l.grams - covered;
-    return { covered, uncovered, price: uncovered > 0 && kiloPrice > 0 ? kiloLinePrice(uncovered, kiloPrice) : 0 };
+    return { covered, uncovered, price: uncovered > 0 ? kiloLinePrice(uncovered, l.pricePerKg ?? 0) : 0 };
   });
-  return { lines: out, balanceAfter: balance, missing: out.reduce((a, x) => a + (x && kiloPrice <= 0 ? x.uncovered : 0), 0) };
+  return { lines: out, balanceAfter: balance };
 }

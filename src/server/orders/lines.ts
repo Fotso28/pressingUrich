@@ -2,9 +2,10 @@ import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "../db";
-import { customers, forfaitMoves, forfaits, itemTypes, prices, services } from "../db/schema";
+import { customers, forfaitMoves, forfaits, itemTypes, kiloTypes, prices, services } from "../db/schema";
 import { fail } from "../action-utils";
 import { allocateKilo, formatKg } from "@/lib/domain/kilo";
+import { formatAmount } from "@/lib/domain/money";
 
 const txt = z.string().trim().max(500).nullish().transform((v) => (v ? v : null));
 const short = z.string().trim().max(120).nullish().transform((v) => (v ? v : null));
@@ -23,6 +24,9 @@ const pieceLine = z.object({
 });
 const kiloLine = z.object({
   kind: z.literal("KILO"),
+  kiloTypeId: z.uuid({ message: "Choisissez le type de linge." }),
+  /** Déduire du solde forfait du client (désactivé hors ligne : le solde n'est connu que du serveur). */
+  useForfait: z.boolean().default(true),
   grams: z.number().int().min(100, "Poids minimal : 0,1 kg.").max(500_000, "Poids trop élevé."),
   description: short,
   observations: txt,
@@ -39,7 +43,7 @@ type Parsed = z.infer<typeof pieceLine> | z.infer<typeof kiloLine> | z.infer<typ
 
 export type ResolvedLine = {
   lineNo: number; kind: "PIECE" | "KILO" | "FORFAIT";
-  itemTypeId: string | null; serviceId: string | null; forfaitId: string | null; weightGrams: number | null;
+  itemTypeId: string | null; serviceId: string | null; forfaitId: string | null; kiloTypeId: string | null; weightGrams: number | null;
   itemLabel: string; serviceLabel: string; unitPrice: number; quantity: number; lineTotal: number;
   description: string | null; color: string | null; brand: string | null; observations: string | null;
   /** Exclu de la majoration express (achat de forfait). */
@@ -56,7 +60,7 @@ export async function forfaitBalance(tx: Tx, customerId: string): Promise<number
  * Prix et libellés des lignes d'un dépôt, à partir du catalogue, des forfaits et du solde du client.
  * Renvoie aussi les mouvements de forfait à enregistrer (achats, consommation).
  */
-export async function resolveLines(tx: Tx, customerId: string, raw: Parsed[], kiloPrice: number) {
+export async function resolveLines(tx: Tx, customerId: string, raw: Parsed[]) {
   const pieces = raw.filter((l): l is z.infer<typeof pieceLine> => l.kind === "PIECE");
   const pairs = pieces.length ? await tx.select({
     itemTypeId: prices.itemTypeId, serviceId: prices.serviceId, amount: prices.amount, maxAmount: prices.maxAmount,
@@ -65,17 +69,20 @@ export async function resolveLines(tx: Tx, customerId: string, raw: Parsed[], ki
     .where(and(eq(prices.active, true), eq(itemTypes.active, true), eq(services.active, true), inArray(prices.itemTypeId, pieces.map((l) => l.itemTypeId)))) : [];
   const fIds = raw.flatMap((l) => (l.kind === "FORFAIT" ? [l.forfaitId] : []));
   const fs = fIds.length ? await tx.select().from(forfaits).where(and(inArray(forfaits.id, fIds), eq(forfaits.active, true))) : [];
+  const kIds = raw.flatMap((l) => (l.kind === "KILO" ? [l.kiloTypeId] : []));
+  const ks = kIds.length ? await tx.select().from(kiloTypes).where(and(inArray(kiloTypes.id, kIds), eq(kiloTypes.active, true))) : [];
   const hasKilo = raw.some((l) => l.kind !== "PIECE");
   // Verrou sur le client : deux dépôts simultanés ne consomment pas deux fois le même solde.
   if (hasKilo) await tx.select({ id: customers.id }).from(customers).where(eq(customers.id, customerId)).for("update");
   const balance = hasKilo ? await forfaitBalance(tx, customerId) : 0;
-  const alloc = allocateKilo(balance, raw.map((l) => ({
-    kind: l.kind, grams: l.kind === "KILO" ? l.grams : l.kind === "FORFAIT" ? (fs.find((f) => f.id === l.forfaitId)?.grams ?? 0) : 0,
-  })), kiloPrice);
-  if (alloc.missing > 0) fail(`Solde forfait insuffisant : il manque ${formatKg(alloc.missing)}. Ajoutez un forfait au dépôt.`);
+  const alloc = allocateKilo(balance, raw.map((l, i) => {
+    if (l.kind !== "KILO") return { kind: l.kind, grams: l.kind === "FORFAIT" ? (fs.find((f) => f.id === l.forfaitId)?.grams ?? 0) : 0 };
+    const k = ks.find((x) => x.id === l.kiloTypeId) ?? fail(`Ligne ${i + 1} : type de linge indisponible.`);
+    return { kind: l.kind, grams: l.grams, pricePerKg: k.pricePerKg, useForfait: l.useForfait };
+  }));
 
   const lines: ResolvedLine[] = raw.map((l, i) => {
-    const base = { lineNo: i + 1, description: null, color: null, brand: null, observations: null, itemTypeId: null, serviceId: null, forfaitId: null, weightGrams: null, noSurcharge: false };
+    const base = { lineNo: i + 1, description: null, color: null, brand: null, observations: null, itemTypeId: null, serviceId: null, forfaitId: null, kiloTypeId: null, weightGrams: null, noSurcharge: false };
     if (l.kind === "PIECE") {
       const p = pairs.find((x) => x.itemTypeId === l.itemTypeId && x.serviceId === l.serviceId);
       if (!p) fail(`Ligne ${i + 1} : cette combinaison article × service n'a pas de prix.`);
@@ -93,13 +100,15 @@ export async function resolveLines(tx: Tx, customerId: string, raw: Parsed[], ki
         unitPrice: f.price, quantity: 1, lineTotal: f.price, noSurcharge: true };
     }
     const a = alloc.lines[i]!;
-    return { ...base, kind: "KILO", weightGrams: l.grams, itemLabel: "Linge au kilo", serviceLabel: a.uncovered > 0 ? "Au kilo" : "Forfait",
+    const k = ks.find((x) => x.id === l.kiloTypeId)!;
+    return { ...base, kind: "KILO", kiloTypeId: k.id, weightGrams: l.grams, itemLabel: k.name,
+      serviceLabel: a.uncovered === 0 ? "Forfait" : `${formatAmount(k.pricePerKg)}/kg${a.covered ? " + forfait" : ""}`,
       unitPrice: a.price, quantity: 1, lineTotal: a.price, description: l.description, observations: l.observations };
   });
 
   const moves = [
     ...lines.filter((l) => l.kind === "FORFAIT").map((l) => ({ kind: "ACHAT", grams: l.weightGrams!, label: `Achat ${l.itemLabel}` })),
-    ...lines.flatMap((l, i) => (l.kind === "KILO" && alloc.lines[i]!.covered > 0 ? [{ kind: "CONSO", grams: -alloc.lines[i]!.covered, label: `Linge au kilo (${formatKg(l.weightGrams!)})` }] : [])),
+    ...lines.flatMap((l, i) => (l.kind === "KILO" && alloc.lines[i]!.covered > 0 ? [{ kind: "CONSO", grams: -alloc.lines[i]!.covered, label: `${l.itemLabel} (${formatKg(alloc.lines[i]!.covered)})` }] : [])),
   ];
   return { lines, moves, onlyForfaits: lines.every((l) => l.kind === "FORFAIT") };
 }

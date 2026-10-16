@@ -66,7 +66,7 @@ export async function createOrder(raw: CreateOrderInput) {
 
     try {
       const created = await db.transaction(async (tx) => {
-        const { lines, moves, onlyForfaits } = await resolveLines(tx, input.customerId, input.lines, settings.kiloPrice);
+        const { lines, moves, onlyForfaits } = await resolveLines(tx, input.customerId, input.lines);
         const expressRatePct = input.isExpress ? settings.expressRatePct : 0;
         const totals = computeOrderTotals(lines, { isExpress: input.isExpress, expressRatePct, discount: input.discount as DiscountInput });
         checkDiscount(user, totals.discountPct, settings.agentMaxDiscountPct);

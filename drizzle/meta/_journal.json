@@ -57,6 +57,13 @@
       "when": 1792164609040,
       "tag": "0007_kilo_forfaits",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792166605353,
+      "tag": "0008_kilo_types",
+      "breakpoints": true
     }
   ]
 }

@@ -14,19 +14,20 @@ describe("linge au kilo et forfaits", () => {
     expect(formatKg(4500)).toBe("4,5 kg");
   });
 
-  it("déduit le linge du solde, forfaits achetés dans le dépôt compris", () => {
-    const a = allocateKilo(2000, [{ kind: "FORFAIT", grams: 23000 }, { kind: "KILO", grams: 8000 }], 0);
-    expect(a.lines[1]).toEqual({ covered: 8000, uncovered: 0, price: 0 });
-    expect(a.balanceAfter).toBe(17000);
-    expect(a.missing).toBe(0);
+  it("facture le linge au prix du kilo de son type", () => {
+    const a = allocateKilo(0, [{ kind: "KILO", grams: 5000, pricePerKg: 1000 }, { kind: "KILO", grams: 2300, pricePerKg: 1200 }]);
+    expect(a.lines.map((l) => l?.price)).toEqual([5000, 2800]); // 2,3 × 1 200 = 2 760 → 2 800
+    expect(kiloLinePrice(2300, 870)).toBe(2100); // arrondi à la centaine supérieure
   });
 
-  it("signale le poids manquant sans prix au kilo, le facture sinon", () => {
-    expect(allocateKilo(3000, [{ kind: "KILO", grams: 5000 }], 0).missing).toBe(2000);
-    const paid = allocateKilo(3000, [{ kind: "KILO", grams: 5000 }], 1000);
-    expect(paid.missing).toBe(0);
-    expect(paid.lines[0]).toEqual({ covered: 3000, uncovered: 2000, price: 2000 });
-    expect(kiloLinePrice(2300, 870)).toBe(2100); // arrondi à la centaine supérieure
+  it("déduit d'abord le solde forfait (achats du dépôt compris), facture le reste", () => {
+    const a = allocateKilo(2000, [{ kind: "FORFAIT", grams: 23000 }, { kind: "KILO", grams: 8000, pricePerKg: 1000 }]);
+    expect(a.lines[1]).toEqual({ covered: 8000, uncovered: 0, price: 0 });
+    expect(a.balanceAfter).toBe(17000);
+    const part = allocateKilo(3000, [{ kind: "KILO", grams: 5000, pricePerKg: 1000 }]);
+    expect(part.lines[0]).toEqual({ covered: 3000, uncovered: 2000, price: 2000 });
+    // Hors ligne : le solde n'est pas utilisé.
+    expect(allocateKilo(3000, [{ kind: "KILO", grams: 5000, pricePerKg: 1000, useForfait: false }]).lines[0]?.price).toBe(5000);
   });
 
   it("n'applique pas la majoration express aux achats de forfait", () => {

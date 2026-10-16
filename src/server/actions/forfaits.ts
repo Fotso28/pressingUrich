@@ -4,9 +4,9 @@ import { revalidatePath } from "next/cache";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { forfaitMoves, forfaits, orderItems, settings } from "../db/schema";
+import { forfaitMoves, forfaits, kiloTypes, orderItems } from "../db/schema";
 import { requireRole, requireUser } from "../session";
-import { fail, run } from "../action-utils";
+import { fail, pgCode, run } from "../action-utils";
 import { forfaitBalance } from "../orders/lines";
 
 const price = z.number().int().min(100, "Prix invalide.").max(10_000_000).refine((v) => v % 100 === 0, "Le prix doit être un multiple de 100 FCFA.");
@@ -44,12 +44,39 @@ export async function deleteForfait(raw: { id: string }) {
   });
 }
 
-/** Prix du kilo hors forfait (0 = linge au kilo seulement avec un forfait). */
-export async function setKiloPrice(raw: { kiloPrice: number }) {
+const kiloTypeSchema = z.object({
+  id: z.uuid().optional(),
+  name: z.string().trim().min(2, "Nom obligatoire.").max(60),
+  pricePerKg: price,
+  sortOrder: z.number().int().min(0).max(9999),
+  active: z.boolean(),
+});
+
+/** Crée ou modifie un type de linge au kilo (prix du kilo). Les dépôts déjà faits gardent leur prix. */
+export async function saveKiloType(raw: z.input<typeof kiloTypeSchema>) {
   return run(async () => {
     await requireRole("ADMIN");
-    const { kiloPrice } = z.object({ kiloPrice: z.number().int().min(0).max(1_000_000).refine((v) => v % 100 === 0, "Multiple de 100 FCFA.") }).parse(raw);
-    await db.update(settings).set({ kiloPrice, updatedAt: new Date() }).where(eq(settings.id, 1));
+    const { id, ...k } = kiloTypeSchema.parse(raw);
+    try {
+      if (id) await db.update(kiloTypes).set({ ...k, updatedAt: new Date() }).where(eq(kiloTypes.id, id));
+      else await db.insert(kiloTypes).values(k);
+    } catch (e) {
+      if (pgCode(e) === "23505") fail("Ce nom existe déjà.");
+      throw e;
+    }
+    revalidatePath("/", "layout");
+    return undefined;
+  });
+}
+
+/** Suppression seulement si le type n'a jamais servi ; sinon on le désactive. */
+export async function deleteKiloType(raw: { id: string }) {
+  return run(async () => {
+    await requireRole("ADMIN");
+    const { id } = z.object({ id: z.uuid() }).parse(raw);
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(orderItems).where(eq(orderItems.kiloTypeId, id));
+    if (n > 0) fail(`Type déjà utilisé dans ${n} dépôt(s) : désactivez-le plutôt que de le supprimer.`);
+    await db.delete(kiloTypes).where(eq(kiloTypes.id, id));
     revalidatePath("/", "layout");
     return undefined;
   });

@@ -7,7 +7,7 @@ import { Minus, Plus, Trash2, ChevronDown, Zap, Search, ArrowLeft, ArrowRight, C
 import { createOrder, type CreateOrderInput } from "@/server/actions/orders";
 import { getForfaitBalance } from "@/server/actions/forfaits";
 import type { OrderLineInput } from "@/server/orders/lines";
-import { allocateKilo, formatKg, parseKg } from "@/lib/domain/kilo";
+import { allocateKilo, formatKg, kiloLinePrice, parseKg } from "@/lib/domain/kilo";
 import type { DepositCatalog } from "@/server/queries/catalog";
 import { CustomerPicker, type PickedCustomer } from "@/components/customers/customer-picker";
 import { Button } from "@/components/ui/button";
@@ -27,14 +27,14 @@ type PieceLine = {
   minPrice: number; maxPrice: number | null;
   description: string; color: string; brand: string; observations: string; open: boolean;
 };
-type KiloLine = { key: string; kind: "KILO"; grams: number; description: string; observations: string };
+type KiloLine = { key: string; kind: "KILO"; kiloTypeId: string; typeName: string; pricePerKg: number; grams: number; description: string; observations: string };
 type ForfaitLine = { key: string; kind: "FORFAIT"; forfaitId: string; name: string; price: number; grams: number };
 type Line = PieceLine | KiloLine | ForfaitLine;
 export type DepositForfait = { id: string; name: string; price: number; grams: number };
 
 /** Brouillon du dépôt en cours, gardé dans le navigateur : on reprend là où on s'était arrêté. */
 type Draft = {
-  v: 1; savedAt: number; step: Step; customer: PickedCustomer | null; lines: Line[]; isExpress: boolean; dueEdited: string | null;
+  v: 2; savedAt: number; step: Step; customer: PickedCustomer | null; lines: Line[]; isExpress: boolean; dueEdited: string | null;
   discountType: "MONTANT" | "POURCENT"; discountValue: number | null; notes: string; deposit: number | null; method: Method; reference: string;
   idempotencyKey: string; depositKey: string;
 };
@@ -42,7 +42,7 @@ const DRAFT_TTL = 3 * 86_400_000;
 const readDraft = (k: string): Draft | null => {
   try {
     const d = JSON.parse(localStorage.getItem(k) ?? "null") as Draft | null;
-    return d && d.v === 1 && Date.now() - d.savedAt < DRAFT_TTL ? d : null;
+    return d && d.v === 2 && Date.now() - d.savedAt < DRAFT_TTL ? d : null;
   } catch { return null; }
 };
 
@@ -60,13 +60,11 @@ const STEP_LABEL: Record<Step, string> = { client: "Client", articles: "Articles
 
 type SubmitResult = { ok: true; data: { id: string; number: number } } | { ok: false; error: string };
 
-export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin, settings, offline, draftKey, forfaits = [], kiloPrice = 0 }: {
+export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin, settings, offline, draftKey, forfaits = [] }: {
   catalog: DepositCatalog;
   /** Clé du brouillon local (par compte). */
   draftKey: string;
   forfaits?: DepositForfait[];
-  /** Prix du kilo hors forfait (0 = seulement avec un forfait). */
-  kiloPrice?: number;
   initialCustomer: PickedCustomer | null;
   hasOpenSession: boolean;
   isAdmin: boolean;
@@ -102,6 +100,8 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
   const [mode, setMode] = useState<"PIECE" | "KILO">("PIECE");
   const [kgText, setKgText] = useState("");
   const [kgDesc, setKgDesc] = useState("");
+  const kiloTypes = catalog.kiloTypes ?? [];
+  const [kiloTypeId, setKiloTypeId] = useState<string | null>(kiloTypes[0]?.id ?? null);
   const [fetchedBalance, setFetchedBalance] = useState<{ customerId: string; grams: number } | null>(null);
   const balance = fetchedBalance && fetchedBalance.customerId === customer?.id ? fetchedBalance.grams : null;
   const [restored, setRestored] = useState<number | null>(null);
@@ -126,7 +126,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
     if (!loaded.current) return;
     try {
       if (!customer && lines.length === 0) { localStorage.removeItem(draftKey); return; }
-      const d: Draft = { v: 1, savedAt: Date.now(), step, customer, lines, isExpress, dueEdited, discountType, discountValue, notes, deposit, method, reference, idempotencyKey, depositKey };
+      const d: Draft = { v: 2, savedAt: Date.now(), step, customer, lines, isExpress, dueEdited, discountType, discountValue, notes, deposit, method, reference, idempotencyKey, depositKey };
       localStorage.setItem(draftKey, JSON.stringify(d));
     } catch { /* stockage indisponible : pas de brouillon */ }
   }, [draftKey, step, customer, lines, isExpress, dueEdited, discountType, discountValue, notes, deposit, method, reference, idempotencyKey, depositKey]);
@@ -157,13 +157,14 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
 
   const discount: DiscountInput = useMemo(() => (discountValue ? { type: discountType, value: discountValue } : null), [discountType, discountValue]);
   // Linge au kilo : couvert par le solde forfait du client et les forfaits achetés dans ce dépôt.
-  const alloc = useMemo(() => allocateKilo(balance ?? 0, lines.map((l) => ({ kind: l.kind, grams: l.kind === "PIECE" ? 0 : l.grams })), kiloPrice), [balance, lines, kiloPrice]);
+  // Hors ligne, le solde forfait n'est pas connu : le linge au kilo est facturé au prix du kilo.
+  const alloc = useMemo(() => allocateKilo(offline ? 0 : (balance ?? 0), lines.map((l) => (l.kind === "KILO"
+    ? { kind: l.kind, grams: l.grams, pricePerKg: l.pricePerKg, useForfait: !offline } : { kind: l.kind, grams: l.kind === "FORFAIT" ? l.grams : 0 }))), [balance, lines, offline]);
   const priced = useMemo(() => lines.map((l, i) => (l.kind === "PIECE" ? { unitPrice: l.unitPrice, quantity: l.quantity }
     : l.kind === "FORFAIT" ? { unitPrice: l.price, quantity: 1, noSurcharge: true } : { unitPrice: alloc.lines[i]?.price ?? 0, quantity: 1 })), [lines, alloc]);
   const totals = useMemo(() => computeOrderTotals(priced, { isExpress, expressRatePct: settings.expressRatePct, discount }),
     [priced, isExpress, settings.expressRatePct, discount]);
   const hasKilo = lines.some((l) => l.kind === "KILO");
-  const kiloMissing = hasKilo && balance !== null ? alloc.missing : 0;
   const onlyForfaits = lines.length > 0 && lines.every((l) => l.kind === "FORFAIT");
   const autoDue = computeDueAt(openedAt, { isExpress, standardHours: settings.standardDelayHours, expressHours: settings.expressDelayHours });
   const dueValue = dueEdited ?? toDateTimeLocal(autoDue);
@@ -198,15 +199,16 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
   const updateLine = (key: string, patch: Partial<PieceLine> | Partial<KiloLine>) => setLines((ls) => ls.map((l) => (l.key === key ? ({ ...l, ...patch } as Line) : l)));
   const kgGrams = parseKg(kgText);
   function addKilo() {
-    if (!kgGrams) return;
-    setLines((ls) => [...ls, { key: crypto.randomUUID(), kind: "KILO", grams: kgGrams, description: kgDesc.trim(), observations: "" }]);
+    const k = kiloTypes.find((x) => x.id === kiloTypeId);
+    if (!kgGrams || !k) return;
+    setLines((ls) => [...ls, { key: crypto.randomUUID(), kind: "KILO", kiloTypeId: k.id, typeName: k.name, pricePerKg: k.pricePerKg, grams: kgGrams, description: kgDesc.trim(), observations: "" }]);
     setKgText(""); setKgDesc("");
   }
   const addForfait = (f: DepositForfait) => setLines((ls) => [...ls, { key: crypto.randomUUID(), kind: "FORFAIT", forfaitId: f.id, name: f.name, price: f.price, grams: f.grams }]);
 
   const badPrice = lines.some((l) => l.kind === "PIECE" && l.maxPrice !== null && (l.unitPrice < l.minPrice || l.unitPrice > l.maxPrice || l.unitPrice % 100 !== 0));
-  const canNext: Record<Step, boolean> = { client: !!customer, articles: lines.length > 0 && !kiloMissing && !badPrice && !(hasKilo && balance === null && !offline), options: !discountTooHigh, paiement: true };
-  const blockedReason = offline?.blockedReason ?? (offline && lines.some((l) => l.kind !== "PIECE") ? "Linge au kilo et forfaits : connexion internet nécessaire." : null);
+  const canNext: Record<Step, boolean> = { client: !!customer, articles: lines.length > 0 && !badPrice && !(hasKilo && !!customer && balance === null && !offline), options: !discountTooHigh, paiement: true };
+  const blockedReason = offline?.blockedReason ?? (offline && lines.some((l) => l.kind === "FORFAIT") ? "Achat de forfait : connexion internet nécessaire." : null);
   const canSubmit = !!customer && canNext.articles && !discountTooHigh && !depositTooHigh && !depositBlocked && !blockedReason && !forfaitUnpaid;
 
   async function submit() {
@@ -218,7 +220,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
       customerId: customer.id,
       lines: lines.map((l): OrderLineInput => (l.kind === "PIECE"
         ? { kind: "PIECE", itemTypeId: l.itemTypeId, serviceId: l.serviceId, quantity: l.quantity, unitPrice: l.maxPrice !== null ? l.unitPrice : null, description: l.description, color: l.color, brand: l.brand, observations: l.observations }
-        : l.kind === "KILO" ? { kind: "KILO", grams: l.grams, description: l.description, observations: l.observations }
+        : l.kind === "KILO" ? { kind: "KILO", kiloTypeId: l.kiloTypeId, grams: l.grams, useForfait: !offline, description: l.description, observations: l.observations }
         : { kind: "FORFAIT", forfaitId: l.forfaitId })),
       isExpress,
       dueAt: dueEdited && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
@@ -285,8 +287,8 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
               ))}
             </div>
             {mode === "KILO" ? (
-              <KiloPanel offline={!!offline} customer={customer} balance={balance} alloc={alloc} lines={lines} forfaits={forfaits} kiloPrice={kiloPrice}
-                kgText={kgText} setKgText={setKgText} kgDesc={kgDesc} setKgDesc={setKgDesc} kgGrams={kgGrams} onAdd={addKilo} onForfait={addForfait} />
+              <KiloPanel offline={!!offline} customer={customer} balance={balance} alloc={alloc} lines={lines} forfaits={forfaits}
+                kiloTypes={kiloTypes} kiloTypeId={kiloTypeId} setKiloTypeId={setKiloTypeId} kgText={kgText} setKgText={setKgText} kgDesc={kgDesc} setKgDesc={setKgDesc} kgGrams={kgGrams} onAdd={addKilo} onForfait={addForfait} />
             ) : (<>
             <div className="relative mb-4">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
@@ -494,7 +496,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
               )}
               {!canSubmit && !blockedReason && (
                 <p className="hidden text-center text-[13px] text-ink-3 lg:block">
-                  {!customer ? "Choisissez un client." : lines.length === 0 ? "Ajoutez au moins un article." : kiloMissing ? `Solde forfait insuffisant : il manque ${formatKg(kiloMissing)}.` : forfaitUnpaid ? "Encaissez la totalité du forfait." : "Corrigez les champs signalés."}
+                  {!customer ? "Choisissez un client." : lines.length === 0 ? "Ajoutez au moins un article." : forfaitUnpaid ? "Encaissez la totalité du forfait." : "Corrigez les champs signalés."}
                 </p>
               )}
             </div>
@@ -548,10 +550,11 @@ function SpecialLine({ line: l, alloc, onChange, onRemove }: {
       <div className="flex items-start gap-2">
         <Scale className="mt-0.5 size-4 shrink-0 text-ink-3" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-medium">{l.kind === "KILO" ? `Linge au kilo · ${formatKg(l.grams)}` : l.name}</p>
+          <p className="text-[15px] font-medium leading-snug">{l.kind === "KILO" ? `${l.typeName} · ${formatKg(l.grams)}` : l.name}</p>
           <p className="text-[13px] text-ink-3">
             {l.kind === "FORFAIT" ? <>Achat de forfait · +{formatKg(l.grams)} au solde</>
-              : alloc && alloc.uncovered > 0 ? (alloc.price > 0 ? <>{formatKg(alloc.covered)} au forfait · {formatKg(alloc.uncovered)} au prix du kilo</> : <span className="text-danger">Solde insuffisant : il manque {formatKg(alloc.uncovered)}</span>)
+              : !alloc || alloc.covered === 0 ? <>{formatKg(l.grams)} × <Money value={l.pricePerKg} unit={false} /> FCFA/kg</>
+              : alloc.uncovered > 0 ? <>{formatKg(alloc.covered)} déduits du forfait · {formatKg(alloc.uncovered)} × <Money value={l.pricePerKg} unit={false} /> FCFA/kg</>
               : "Déduit du solde forfait"}
           </p>
         </div>
@@ -567,20 +570,30 @@ function SpecialLine({ line: l, alloc, onChange, onRemove }: {
   );
 }
 
-/** Saisie du linge au kilo : poids, solde forfait du client, achat de forfait. */
-function KiloPanel({ offline, customer, balance, alloc, lines, forfaits, kiloPrice, kgText, setKgText, kgDesc, setKgDesc, kgGrams, onAdd, onForfait }: {
-  offline: boolean; customer: PickedCustomer | null; balance: number | null; alloc: ReturnType<typeof allocateKilo>; lines: Line[];
-  forfaits: DepositForfait[]; kiloPrice: number; kgText: string; setKgText: (v: string) => void; kgDesc: string; setKgDesc: (v: string) => void;
+/** Saisie du linge au kilo : type de linge (prix du kilo), poids ; solde forfait du client et achat de forfait. */
+function KiloPanel({ offline, customer, balance, alloc, lines, forfaits, kiloTypes, kiloTypeId, setKiloTypeId, kgText, setKgText, kgDesc, setKgDesc, kgGrams, onAdd, onForfait }: {
+  offline: boolean; customer: PickedCustomer | null; balance: number | null; alloc: ReturnType<typeof allocateKilo>; lines: Line[]; forfaits: DepositForfait[];
+  kiloTypes: DepositCatalog["kiloTypes"]; kiloTypeId: string | null; setKiloTypeId: (id: string) => void;
+  kgText: string; setKgText: (v: string) => void; kgDesc: string; setKgDesc: (v: string) => void;
   kgGrams: number | null; onAdd: () => void; onForfait: (f: DepositForfait) => void;
 }) {
-  if (offline) return <p className="rounded-md bg-warning-50 px-3 py-2 text-sm text-[#8a5300]">Le linge au kilo et les forfaits demandent une connexion internet (solde du client).</p>;
-  if (!customer) return <p className="rounded-md bg-canvas px-3 py-2 text-sm text-ink-3">Choisissez d&apos;abord le client : son solde forfait s&apos;affichera ici.</p>;
+  if (kiloTypes.length === 0) return <p className="rounded-md bg-warning-50 px-3 py-2 text-sm text-[#8a5300]">Aucun type de linge au kilo. Le gérant doit les créer (Paramètres › Catalogue).</p>;
+  const type = kiloTypes.find((k) => k.id === kiloTypeId) ?? kiloTypes[0];
   const bought = lines.reduce((a, l) => a + (l.kind === "FORFAIT" ? l.grams : 0), 0);
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between rounded-lg bg-canvas px-4 py-3">
-        <span className="min-w-0 truncate text-sm text-ink-2">Solde forfait · {customer.fullName}</span>
-        <span className="font-semibold tnum">{balance === null ? "…" : formatKg(balance)}{bought > 0 && <span className="text-success"> +{formatKg(bought)}</span>}</span>
+      <div>
+        <p className="eyebrow mb-2">Type de linge</p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {kiloTypes.map((k) => (
+            <button key={k.id} type="button" onClick={() => setKiloTypeId(k.id)} aria-pressed={type.id === k.id}
+              className={cn("flex min-h-14 flex-col items-start justify-center rounded-lg border px-3 py-2 text-left transition",
+                type.id === k.id ? "border-brand bg-brand-50 ring-3 ring-brand/12" : "border-line-2 bg-surface hover:bg-canvas")}>
+              <span className="text-[14px] font-medium leading-tight">{k.name}</span>
+              <span className="text-[12.5px] text-ink-3 tnum"><Money value={k.pricePerKg} unit={false} /> FCFA/kg</span>
+            </button>
+          ))}
+        </div>
       </div>
       <form className="grid grid-cols-1 gap-2 sm:grid-cols-[8rem_minmax(0,1fr)_auto]" onSubmit={(e) => { e.preventDefault(); onAdd(); }}>
         <div className="relative">
@@ -590,22 +603,30 @@ function KiloPanel({ offline, customer, balance, alloc, lines, forfaits, kiloPri
         <Input value={kgDesc} onChange={(e) => setKgDesc(e.target.value.slice(0, 120))} placeholder="Description (facultatif)" aria-label="Description" />
         <Button type="submit" disabled={!kgGrams}><Plus />Ajouter</Button>
       </form>
-      <p className="text-[13px] text-ink-3">
-        Restera après ce dépôt : <span className="font-medium text-ink tnum">{formatKg(Math.max(0, alloc.balanceAfter))}</span>
-        {kiloPrice > 0 ? <> · hors forfait : <Money value={kiloPrice} unit={false} /> FCFA/kg</> : " · sans forfait, le linge au kilo n'est pas possible."}
-      </p>
-      {forfaits.length > 0 && (
-        <div>
-          <p className="eyebrow mb-2">Acheter un forfait</p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {forfaits.map((f) => (
-              <button key={f.id} type="button" onClick={() => onForfait(f)}
-                className="flex min-h-[3.25rem] items-center justify-between gap-2 rounded-md border border-line-2 bg-surface px-3.5 py-2 text-left transition hover:border-brand hover:ring-3 hover:ring-brand/10">
-                <span className="text-[14.5px] font-medium leading-tight">{formatKg(f.grams)}</span>
-                <Money value={f.price} unit={false} className="text-sm font-semibold text-brand" />
-              </button>
-            ))}
+      {kgGrams ? <p className="text-[13px] text-ink-3">{formatKg(kgGrams)} × <Money value={type.pricePerKg} unit={false} /> = <span className="font-medium text-ink"><Money value={kiloLinePrice(kgGrams, type.pricePerKg)} /></span></p> : null}
+      {offline ? (
+        <p className="rounded-md bg-canvas px-3 py-2 text-[13px] text-ink-3">Hors ligne : le solde forfait du client n&apos;est pas déduit et les forfaits ne se vendent qu&apos;en ligne.</p>
+      ) : customer && (
+        <div className="space-y-3 rounded-lg border border-line p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="min-w-0 truncate text-sm text-ink-2">Solde forfait · {customer.fullName}</span>
+            <span className="font-semibold tnum">{balance === null ? "…" : formatKg(balance)}{bought > 0 && <span className="text-success"> +{formatKg(bought)}</span>}</span>
           </div>
+          {(balance ?? 0) + bought > 0 && <p className="text-[13px] text-ink-3">Les kilos sont déduits du forfait en priorité. Restera : <span className="font-medium text-ink tnum">{formatKg(Math.max(0, alloc.balanceAfter))}</span></p>}
+          {forfaits.length > 0 && (
+            <div>
+              <p className="eyebrow mb-2">Vendre un forfait</p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {forfaits.map((f) => (
+                  <button key={f.id} type="button" onClick={() => onForfait(f)}
+                    className="flex min-h-12 items-center justify-between gap-2 rounded-md border border-line-2 bg-surface px-3.5 py-2 text-left transition hover:border-brand hover:ring-3 hover:ring-brand/10">
+                    <span className="text-[14.5px] font-medium leading-tight">{formatKg(f.grams)}</span>
+                    <Money value={f.price} unit={false} className="text-sm font-semibold text-brand" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -20,9 +20,11 @@ Elle suit le dossier de conception (PRD, TRD, App Flow, UI/UX, schéma, plan d'i
   **prix variables** (ex. blouson de 1 000 à 2 000, choisi au comptoir), express, remise plafonnée pour l'agent,
   acompte. Enregistrement transactionnel et **idempotent** (un double clic ne crée qu'une commande).
   La saisie est gardée en **brouillon local** (navigateur) : un retour en arrière ou un rechargement ne fait rien perdre.
-- **Linge au kilo et forfaits** : le client achète un forfait (au départ 15 000 = 17 kg, 20 000 = 23 kg,
-  30 000 = 37 kg, modifiables dans Paramètres › Catalogue) ; chaque dépôt au kilo est pesé et déduit de son solde,
-  visible et corrigeable (gérant) sur sa fiche. Un prix du kilo hors forfait peut être fixé (vide = forfait obligatoire).
+- **Linge au kilo** : on choisit le type de linge (chacun a son prix du kilo, ex. linge ordinaire, linge blanc,
+  draps, couvertures — Paramètres › Catalogue), on pèse, le prix suit. Fonctionne aussi hors ligne.
+- **Forfaits** : le client achète un poids de linge à l'avance (au départ 15 000 = 17 kg, 20 000 = 23 kg,
+  30 000 = 37 kg, modifiables) ; ses dépôts au kilo en sont déduits en priorité, le reste est payé au prix du kilo.
+  Solde et historique sur sa fiche, corrigeables par le gérant. Vente et déduction de forfait : en ligne seulement.
 - **WhatsApp** : récapitulatif du dépôt à l'enregistrement, « commande prête » quand elle l'est (lien wa.me ;
   le préfixe 237 est ajouté au numéro s'il manque).
 - **Commandes** : onglets par statut, filtres (retard, impayées, client, **jour / mois / période**), actions
