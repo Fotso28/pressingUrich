@@ -8,7 +8,7 @@ const withSerwist = withSerwistInit({
 });
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["pg"],
+  serverExternalPackages: ["pg", "ws", "@neondatabase/serverless", "bufferutil", "utf-8-validate"],
 };
 
 export default withSerwist(nextConfig);
