@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import { customers, orders, payments, user } from "../db/schema";
-import { periodStart, TZ } from "@/lib/domain/dates";
+import { periodStart } from "@/lib/domain/dates";
 import { METHODS, type Method } from "@/lib/domain/cash";
 import { getSettings } from "./settings";
 
@@ -37,19 +37,6 @@ export async function getManagerDashboard() {
     revenueByMethod(periodStart("day")), revenueByMethod(periodStart("week")), revenueByMethod(periodStart("month")), getCounters(),
   ]);
   return { day, week, month, counters };
-}
-
-/** CA encaissé par mois (12 derniers mois) pour le graphique des rapports. */
-export async function monthlyRevenue(months = 12) {
-  const rows = await db.execute<{ month: string; total: number }>(sql`
-    select to_char(date_trunc('month', ${payments.createdAt} at time zone ${TZ}), 'YYYY-MM') as month,
-           coalesce(sum(${payments.amount}),0)::int as total
-    from ${payments}
-    where ${payments.voidedAt} is null
-      and ${payments.createdAt} >= (date_trunc('month', now() at time zone ${TZ}) - make_interval(months => ${months - 1})) at time zone ${TZ}
-    group by 1 order by 1`);
-  const list = (rows as unknown as { rows?: { month: string; total: number }[] }).rows ?? (rows as unknown as { month: string; total: number }[]);
-  return list.map((r) => ({ month: r.month, total: Number(r.total) }));
 }
 
 const orderBrief = {

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { pageUser } from "@/server/session";
 import { getOrder } from "@/server/queries/orders";
 import { formatLabelNumber } from "@/lib/domain/order-number";
 import { formatDate } from "@/lib/domain/dates";
@@ -7,6 +8,7 @@ import { formatDate } from "@/lib/domain/dates";
 export default async function Labels({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
+  await pageUser();
   const o = await getOrder(id);
   if (!o) notFound();
   const lastName = o.customer.fullName.trim().split(/\s+/)[0].toUpperCase();

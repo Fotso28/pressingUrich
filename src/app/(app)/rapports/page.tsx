@@ -63,8 +63,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     <>
       <PageHeader title="Rapports" description="Ventes, dépenses, bénéfice, impayés, commandes en souffrance, clôtures."
         actions={<>
-          <Button asChild variant="secondary"><a href="/api/export/commandes"><Download />Commandes (CSV)</a></Button>
-          <Button asChild variant="secondary"><a href="/api/export/paiements"><Download />Paiements (CSV)</a></Button>
+          <Button asChild variant="secondary"><a href={`/api/export/commandes${month ? `?mois=${month}` : ""}`}><Download />Commandes (CSV)</a></Button>
+          <Button asChild variant="secondary"><a href={`/api/export/paiements${month ? `?mois=${month}` : ""}`}><Download />Paiements (CSV)</a></Button>
+          <Button asChild variant="secondary"><a href={`/api/export/sorties${month ? `?mois=${month}` : ""}`}><Download />Dépenses (CSV)</a></Button>
         </>} />
 
       <div className="mb-6 flex flex-wrap items-center gap-3">

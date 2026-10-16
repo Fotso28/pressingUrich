@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { formatAmount } from "@/lib/domain/money";
 import { db, type Tx } from "../db";
 import {
   cashSessionCounts, cashSessions, customers, expenses, itemTypes, offlineOps, orderItems, orderStatusHistory, orders, payments, prices,
@@ -12,6 +13,7 @@ import { computeCashExpected, EXPENSE_CATEGORIES, METHODS, type Method } from "@
 import { computeOrderTotals } from "@/lib/domain/totals";
 import { isValidPhone, normalizeName, normalizePhone } from "@/lib/domain/normalize";
 import type { OfflineOp, OpResult, Snapshot } from "@/lib/offline/types";
+import "../action-utils"; // messages zod en français
 
 const fail = (m: string): never => { throw new DomainError(m); };
 const method = z.enum(["ESPECES", "MTN_MOMO", "ORANGE_MONEY"]);
@@ -32,12 +34,12 @@ const opSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("ADD_EXPENSE"), expenseId: z.uuid(), sessionId: z.uuid(), label: z.string().trim().min(2).max(200), category: z.enum(EXPENSE_CATEGORIES), method, amount: amount.min(1) }),
   z.object({ ...base, type: z.literal("CLOSE_CASH"), sessionId: z.uuid(), counts: z.object({ ESPECES: amount, MTN_MOMO: amount, ORANGE_MONEY: amount }), comment: text }),
 ]);
-export const syncBodySchema = z.object({ ops: z.array(z.unknown()).max(500) });
+export const syncBodySchema = z.object({ userId: z.string().min(1), ops: z.array(z.unknown()).max(500) });
 
-/** Date de l'opération telle que vécue hors ligne, bornée (pas dans le futur, pas plus de 14 jours). */
+/** Date de l'opération telle que vécue hors ligne, bornée : pas dans le futur, pas avant la durée de session (7 jours). */
 function when(at: string): Date {
   const d = new Date(at), now = Date.now();
-  if (Number.isNaN(d.getTime()) || d.getTime() > now + 5 * 60_000 || d.getTime() < now - 14 * 86_400_000) return new Date();
+  if (Number.isNaN(d.getTime()) || d.getTime() > now + 5 * 60_000 || d.getTime() < now - 7 * 86_400_000) return new Date();
   return d;
 }
 
@@ -78,9 +80,9 @@ async function apply(tx: Tx, u: Snapshot["user"], op: z.infer<typeof opSchema>):
       const settings = await getSettings();
       const pairs = await tx.select({ itemTypeId: prices.itemTypeId, serviceId: prices.serviceId, amount: prices.amount, itemLabel: itemTypes.name, serviceLabel: services.shortName })
         .from(prices).innerJoin(itemTypes, eq(itemTypes.id, prices.itemTypeId)).innerJoin(services, eq(services.id, prices.serviceId))
-        .where(inArray(prices.itemTypeId, op.lines.map((l) => l.itemTypeId)));
+        .where(and(eq(prices.active, true), eq(itemTypes.active, true), eq(services.active, true), inArray(prices.itemTypeId, op.lines.map((l) => l.itemTypeId))));
       const lines = op.lines.map((l, i) => {
-        const p = pairs.find((x) => x.itemTypeId === l.itemTypeId && x.serviceId === l.serviceId) ?? fail(`Ligne ${i + 1} : article ou service inconnu.`);
+        const p = pairs.find((x) => x.itemTypeId === l.itemTypeId && x.serviceId === l.serviceId) ?? fail(`Ligne ${i + 1} : article ou service retiré du catalogue.`);
         return { ...l, unitPrice: p.amount, itemLabel: p.itemLabel, serviceLabel: p.serviceLabel, lineNo: i + 1 };
       });
       const expressRatePct = op.isExpress ? settings.expressRatePct : 0;
@@ -117,7 +119,7 @@ async function apply(tx: Tx, u: Snapshot["user"], op: z.infer<typeof opSchema>):
       if (!o) fail("Commande introuvable.");
       if (o.status === "ANNULEE") fail("Commande annulée : encaissement impossible.");
       const remaining = o.total - o.amountPaid;
-      if (op.amount > remaining) fail(`Montant supérieur au reste à payer (${remaining} FCFA).`);
+      if (op.amount > remaining) fail(`Montant supérieur au reste à payer (${formatAmount(remaining)} FCFA).`);
       const sessionId = await resolveSession(tx, u.id, op.sessionId);
       await tx.insert(payments).values({
         id: op.paymentId, orderId: o.id, cashSessionId: sessionId, method: op.method, amount: op.amount, reference: op.reference,
@@ -132,6 +134,8 @@ async function apply(tx: Tx, u: Snapshot["user"], op: z.infer<typeof opSchema>):
       if (o.status === "RETIREE") return { already: true };
       if (o.status === "ANNULEE") fail("Commande annulée.");
       if (o.total - o.amountPaid > 0) fail("Solde impayé : retrait refusé.");
+      // Comme en ligne : remettre une commande non prête est réservé au gérant.
+      if (o.status !== "PRETE" && u.role !== "ADMIN") fail("Commande non prête : remise réservée au gérant.");
       await tx.update(orders).set({ status: "RETIREE", collectedAt: at, collectedBy: u.id, updatedAt: at, readyAt: o.readyAt ?? at }).where(eq(orders.id, o.id));
       await tx.insert(orderStatusHistory).values({ orderId: o.id, fromStatus: o.status, toStatus: "RETIREE", changedBy: u.id, changedAt: at, reason: o.status !== "PRETE" ? "Retrait hors ligne (commande non marquée prête)" : null });
       return {};
@@ -153,7 +157,9 @@ async function apply(tx: Tx, u: Snapshot["user"], op: z.infer<typeof opSchema>):
         const expected = rows.find((r) => r.method === m)!.expected;
         return { cashSessionId: s.id, method: m, expected, counted: op.counts[m], difference: op.counts[m] - expected };
       }));
-      await tx.update(cashSessions).set({ status: "FERMEE", closedAt: at, closingComment: op.comment ? `${op.comment} (clôture hors ligne)` : "Clôture hors ligne" }).where(eq(cashSessions.id, s.id));
+      const gap = METHODS.some((m) => op.counts[m] !== rows.find((r) => r.method === m)!.expected);
+      const comment = op.comment ? `${op.comment} (clôture hors ligne)` : gap ? "Écart non justifié (clôture hors ligne)" : "Clôture hors ligne";
+      await tx.update(cashSessions).set({ status: "FERMEE", closedAt: at, closingComment: comment }).where(eq(cashSessions.id, s.id));
       return { sessionId: s.id };
     }
   }
@@ -167,7 +173,7 @@ export async function syncOps(u: Snapshot["user"], raw: unknown[]): Promise<OpRe
     const opId = (r as { opId?: string })?.opId ?? "";
     if (!parsed.success) { out.push({ opId, ok: false, error: "Opération invalide." }); continue; }
     const op = parsed.data;
-    const [done] = await db.select().from(offlineOps).where(eq(offlineOps.opId, op.opId)).limit(1);
+    const [done] = await db.select().from(offlineOps).where(and(eq(offlineOps.opId, op.opId), eq(offlineOps.userId, u.id))).limit(1);
     if (done) { out.push({ opId: op.opId, ok: done.ok, error: done.error ?? undefined, data: (done.result as Record<string, unknown>) ?? undefined }); continue; }
     try {
       const data = await db.transaction(async (tx) => {

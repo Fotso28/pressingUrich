@@ -1,5 +1,6 @@
 import { computeOrderTotals } from "@/lib/domain/totals";
 import { METHODS } from "@/lib/domain/cash";
+import { formatOrderNumber } from "@/lib/domain/order-number";
 import type { OfflineOp, OfflineOrder, Snapshot } from "./types";
 
 type State = Snapshot & { queue: OfflineOp[] };
@@ -39,7 +40,7 @@ export function applyOp(s: State, op: OfflineOp): void {
       s.numbers = s.numbers.filter((n) => n !== op.number);
       if (op.deposit && s.session) {
         s.session.received[op.deposit.method] += op.deposit.amount;
-        s.session.moves.unshift({ id: op.deposit.paymentId, kind: "PAIEMENT", label: `Ticket n° ${op.number} (acompte)`, method: op.deposit.method, amount: op.deposit.amount, at: op.at });
+        s.session.moves.unshift({ id: op.deposit.paymentId, kind: "PAIEMENT", label: `Ticket n° ${formatOrderNumber(op.number)} (acompte)`, method: op.deposit.method, amount: op.deposit.amount, at: op.at });
       }
       return;
     }
@@ -48,7 +49,7 @@ export function applyOp(s: State, op: OfflineOp): void {
       if (o) { o.amountPaid += op.amount; o.lastMethod = op.method; o.pending = true; }
       if (s.session) {
         s.session.received[op.method] += op.amount;
-        s.session.moves.unshift({ id: op.paymentId, kind: "PAIEMENT", label: `Ticket n° ${o?.number ?? "?"}`, method: op.method, amount: op.amount, at: op.at });
+        s.session.moves.unshift({ id: op.paymentId, kind: "PAIEMENT", label: `Ticket n° ${o ? formatOrderNumber(o.number) : "?"}`, method: op.method, amount: op.amount, at: op.at });
       }
       return;
     }

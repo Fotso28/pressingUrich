@@ -48,7 +48,7 @@ export function mutate(fn: (s: OfflineState) => OfflineState | void): Promise<Of
 export const isExpired = (s: OfflineState) => new Date(s.expiresAt).getTime() < Date.now();
 
 let syncing: Promise<SyncReport> | null = null;
-export type SyncReport = { sent: number; ok: number; failed: number; offline?: boolean; unauthorized?: boolean; errors: string[] };
+export type SyncReport = { sent: number; ok: number; failed: number; offline?: boolean; unauthorized?: boolean; otherAccount?: boolean; errors: string[]; renumbered: { from: number; to: number }[] };
 
 /**
  * Rejoue la file puis rafraîchit la copie locale. Sans réseau ou sans session, ne fait rien et garde la file.
@@ -56,17 +56,23 @@ export type SyncReport = { sent: number; ok: number; failed: number; offline?: b
  */
 export function syncNow(): Promise<SyncReport> {
   syncing ??= (async (): Promise<SyncReport> => {
-    const report: SyncReport = { sent: 0, ok: 0, failed: 0, errors: [] };
+    const report: SyncReport = { sent: 0, ok: 0, failed: 0, errors: [], renumbered: [] };
     try {
       const current = await loadState();
       const queue = current?.queue ?? [];
       if (queue.length) {
         report.sent = queue.length;
-        const res = await fetch("/api/offline/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ops: queue }), credentials: "same-origin" });
+        const res = await fetch("/api/offline/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: current!.user.id, ops: queue }), credentials: "same-origin" });
         if (res.status === 401) return { ...report, unauthorized: true };
+        if (res.status === 409) return { ...report, otherAccount: true };
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const { results } = (await res.json()) as { results: OpResult[] };
         const byId = new Map(results.map((r) => [r.opId, r]));
+        // Numéro de ticket remplacé par le serveur (bloc expiré) : l'agent doit le savoir pour corriger le ticket remis.
+        for (const op of queue) {
+          const d = byId.get(op.opId)?.data as { number?: number; renumbered?: boolean } | undefined;
+          if (op.type === "CREATE_ORDER" && d?.renumbered && d.number) report.renumbered.push({ from: op.number, to: d.number });
+        }
         await mutate((s) => {
           const done = new Set(results.map((r) => r.opId));
           for (const op of s.queue) {

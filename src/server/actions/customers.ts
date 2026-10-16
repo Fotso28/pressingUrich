@@ -12,7 +12,7 @@ import { isValidPhone, normalizeName, normalizePhone } from "@/lib/domain/normal
 import { searchCustomers, findCustomersByPhone, searchOrders, type CustomerHit, type OrderHit } from "../queries/search";
 
 const customerInput = z.object({
-  fullName: z.string().trim().min(2, "Nom obligatoire."),
+  fullName: z.string().trim().min(2, "Nom obligatoire.").max(120, "Nom trop long."),
   phone: z.string().trim().refine(isValidPhone, "Téléphone invalide (9 chiffres attendus)."),
   address: optText,
   notes: optText,

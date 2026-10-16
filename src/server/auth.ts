@@ -30,7 +30,7 @@ export const auth = betterAuth({
     },
   }),
   // F-AUTH-03 : pas d'inscription publique, les comptes sont créés par le gérant.
-  emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: 6 },
+  emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: 8 },
   // F-AUTH-02 : la session glisse d'un jour à chaque usage et expire après 7 jours d'inactivité.
   session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
   rateLimit: {

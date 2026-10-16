@@ -1,5 +1,9 @@
 import "server-only";
 import { z } from "zod";
+import { fr } from "zod/v4/locales";
+
+// Messages de validation en français par défaut (ceux qui ne sont pas personnalisés dans les schémas).
+z.config(fr());
 import { AuthError } from "./session";
 
 export type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };

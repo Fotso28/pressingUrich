@@ -88,8 +88,30 @@ const monthKey = (d: Date) => dayKey(d).slice(0, 7);
 // `--if-empty` (build Vercel) : ne s'exécute que si SEED_DEMO=1 et qu'aucune commande n'existe.
 const IF_EMPTY = process.argv.includes("--if-empty");
 
+/**
+ * Passage en production réelle : `PURGE_DEMO_DATA=1` (une seule fois, au build) efface le jeu de démonstration —
+ * commandes, clients, caisses, paiements, dépenses, sorties, numéros réservés et comptes de démo (paul, brigitte).
+ * Le catalogue, les paramètres et le compte du gérant sont conservés. Sans effet si la base n'est pas une base de démo.
+ */
+async function purgeDemo(db: ReturnType<typeof drizzleNeon<typeof s>>) {
+  const [meta] = await db.select().from(s.appMeta).where(eq(s.appMeta.key, "demo_version")).limit(1);
+  if (!meta) { console.log("PURGE_DEMO_DATA : pas de jeu de démonstration dans cette base, rien n'est effacé."); return; }
+  await db.execute(sql`TRUNCATE offline_ops, reserved_numbers, outflows, cash_session_counts, expenses, payments, order_status_history, order_items, orders, cash_sessions, customers RESTART IDENTITY CASCADE`);
+  await db.execute(sql`ALTER SEQUENCE order_number_seq RESTART WITH 1`);
+  const demo = await db.select({ id: s.user.id }).from(s.user).where(sql`${s.user.username} in ('paul', 'brigitte')`);
+  for (const d of demo) {
+    await db.delete(s.session).where(eq(s.session.userId, d.id));
+    await db.delete(s.account).where(eq(s.account.userId, d.id));
+    await db.delete(s.user).where(eq(s.user.id, d.id));
+  }
+  await db.update(s.user).set({ monthlySalary: null });
+  await db.delete(s.appMeta).where(eq(s.appMeta.key, "demo_version"));
+  console.log(`Jeu de démonstration effacé (${demo.length} compte(s) de démo supprimé(s)). Base prête pour la production.`);
+}
+
 async function main() {
-  if (IF_EMPTY && process.env.SEED_DEMO !== "1") return;
+  const purge = process.env.PURGE_DEMO_DATA === "1";
+  if (IF_EMPTY && process.env.SEED_DEMO !== "1" && !purge) return;
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL manquant");
   let db: ReturnType<typeof drizzleNeon<typeof s>>;
@@ -103,17 +125,21 @@ async function main() {
     db = drizzlePg({ client: pool, schema: s }) as unknown as typeof db; close = () => pool.end();
   }
 
+  if (purge) { await purgeDemo(db); await close(); return; }
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(s.orders);
   const [meta] = await db.select().from(s.appMeta).where(eq(s.appMeta.key, "demo_version")).limit(1);
   let reset = process.env.DEMO_RESET === "1";
   if (n > 0 && IF_EMPTY) {
     if (meta?.value === DEMO_VERSION) { console.log("Données de démonstration à jour : seed ignoré."); await close(); return; }
+    // Sécurité : on ne régénère que si la base a été remplie par ce script (demo_version présente).
+    // Une base de production avec de vraies commandes n'a pas de demo_version : elle n'est jamais effacée.
+    if (!meta) { console.log("Commandes réelles présentes (pas de jeu de démonstration) : seed ignoré, rien n'est effacé."); await close(); return; }
     console.log(`Jeu de démonstration v${meta?.value ?? "1"} → v${DEMO_VERSION} : régénération.`);
     reset = true;
   }
   if (n > 0 && !reset) throw new Error(`${n} commandes existent déjà. Relancez avec DEMO_RESET=1 pour tout effacer et régénérer.`);
   if (reset) {
-    await db.execute(sql`TRUNCATE outflows, cash_session_counts, expenses, payments, order_status_history, order_items, orders, cash_sessions, customers RESTART IDENTITY CASCADE`);
+    await db.execute(sql`TRUNCATE offline_ops, reserved_numbers, outflows, cash_session_counts, expenses, payments, order_status_history, order_items, orders, cash_sessions, customers RESTART IDENTITY CASCADE`);
     await db.execute(sql`ALTER SEQUENCE order_number_seq RESTART WITH 1`);
     console.log("Données métier effacées.");
   }
@@ -135,6 +161,8 @@ async function main() {
     .where(and(eq(s.settings.id, 1), eq(s.settings.address, "Douala")));
 
   // Agents comptoir
+  // Sur Vercel, pas de mot de passe par défaut connu de tous : DEMO_AGENT_PASSWORD est obligatoire.
+  if (process.env.VERCEL && !process.env.DEMO_AGENT_PASSWORD) throw new Error("DEMO_AGENT_PASSWORD obligatoire pour créer les comptes de démonstration.");
   const agentPassword = process.env.DEMO_AGENT_PASSWORD ?? "agent123";
   if (agentPassword.length < 6) throw new Error("DEMO_AGENT_PASSWORD : 6 caractères minimum.");
   const agents: { id: string; name: string }[] = [];

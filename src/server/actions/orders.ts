@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { formatAmount } from "@/lib/domain/money";
 import { db, type Tx } from "../db";
 import { cashSessions, itemTypes, orderItems, orderStatusHistory, orders, payments, prices, services } from "../db/schema";
 import { requireRole, requireUser, type CurrentUser } from "../session";
@@ -15,7 +16,7 @@ import { canCancel, nextWorkshopStatus, previousStatus, type OrderStatus } from 
 
 const discountSchema = z.object({
   type: z.enum(["MONTANT", "POURCENT"]),
-  value: z.number().int().min(0, "Remise invalide."),
+  value: z.number().int().min(0, "Remise invalide.").max(100_000_000, "Remise invalide."),
 }).nullable();
 
 const lineSchema = z.object({
@@ -30,7 +31,7 @@ const lineSchema = z.object({
 const createOrderSchema = z.object({
   idempotencyKey: z.uuid(),
   customerId: z.uuid({ message: "Choisissez un client." }),
-  lines: z.array(lineSchema).min(1, "Ajoutez au moins un article."),
+  lines: z.array(lineSchema).min(1, "Ajoutez au moins un article.").max(100, "100 lignes maximum."),
   isExpress: z.boolean(),
   dueAt: z.iso.datetime().nullable(),
   discount: discountSchema,
@@ -191,7 +192,7 @@ export async function updateOrder(raw: z.input<typeof updateOrderSchema>) {
       }).where(eq(orders.id, o.id));
       await tx.insert(orderStatusHistory).values({
         orderId: o.id, fromStatus: o.status, toStatus: o.status, changedBy: user.id,
-        reason: `Modification (total ${o.total} → ${totals.total})`,
+        reason: `Modification (total ${formatAmount(o.total)} → ${formatAmount(totals.total)} FCFA)`,
       });
     });
     revalidatePath("/", "layout");
@@ -283,6 +284,8 @@ export async function cancelOrder(raw: { orderId: string; reason: string }) {
       const [o] = await tx.select().from(orders).where(eq(orders.id, orderId)).for("update");
       if (!o) fail("Commande introuvable.");
       if (!canCancel(o.status as OrderStatus)) fail("Seule une commande déposée ou en traitement peut être annulée.");
+      // Sinon l'acompte resterait compté dans le chiffre d'affaires et la caisse.
+      if (o.amountPaid > 0) fail("Des paiements ont été encaissés sur cette commande : annulez-les d'abord (et remboursez le client), puis annulez la commande.");
       const now = new Date();
       await tx.update(orders).set({ status: "ANNULEE", cancelledAt: now, cancelledBy: user.id, cancelReason: reason, updatedAt: now })
         .where(eq(orders.id, o.id));

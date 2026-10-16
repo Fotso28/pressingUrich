@@ -123,3 +123,13 @@ export function monthBounds(key: string): { from: Date; to: Date } {
   const [y, m] = key.split("-").map(Number);
   return { from: new Date(new TZDate(y, m - 1, 1, 0, 0, 0, TZ).getTime()), to: new Date(new TZDate(y, m, 1, 0, 0, 0, TZ).getTime()) };
 }
+
+/** Salaires dus pour un mois de salaire (« 2026-10 »), quelle que soit la date du paiement. */
+export async function salariesForPeriod(period: string): Promise<MoneyOut[]> {
+  const rows = await db.select({ x: outflows, by: user.name }).from(outflows).leftJoin(user, eq(user.id, outflows.createdBy))
+    .where(and(eq(outflows.category, "SALAIRES"), eq(outflows.salaryPeriod, period), isNull(outflows.voidedAt))).orderBy(desc(outflows.occurredAt));
+  return rows.map(({ x, by }) => ({
+    id: x.id, source: "SORTIE" as const, at: x.occurredAt, category: x.category, label: x.label, amount: x.amount, method: x.method,
+    beneficiary: x.beneficiary, beneficiaryUserId: x.beneficiaryUserId, salaryPeriod: x.salaryPeriod, notes: x.notes, by, voided: false, voidReason: null,
+  }));
+}

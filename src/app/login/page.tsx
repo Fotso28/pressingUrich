@@ -5,9 +5,12 @@ import { LoginForm } from "./login-form";
 
 export const metadata = { title: "Connexion" };
 
+/** Retour après connexion : chemin interne uniquement (pas de « //site » ni « /\site »). */
+const safeFrom = (from?: string) => (from && /^\/(?!\/|\\)/.test(from) ? from : "/");
+
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ from?: string }> }) {
   const { from } = await searchParams;
-  if (await getCurrentUser()) redirect(from?.startsWith("/") ? from : "/");
+  if (await getCurrentUser()) redirect(safeFrom(from));
   const settings = await getSettings();
   return (
     <main className="grid min-h-dvh place-items-center bg-canvas px-4 py-10">
@@ -19,7 +22,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <p className="mt-5 text-sm text-ink-3">Connectez-vous pour ouvrir le comptoir</p>
         </div>
         <div className="rounded-xl border border-line bg-surface p-6 shadow-card">
-          <LoginForm from={from?.startsWith("/") ? from : "/"} />
+          <LoginForm from={safeFrom(from)} />
         </div>
       </div>
     </main>

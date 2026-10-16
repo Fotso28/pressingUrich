@@ -19,25 +19,6 @@ function uniqueName(e: unknown): never {
   throw e;
 }
 
-export async function upsertItemType(raw: { id?: string; name: string; isFrequent: boolean; sortOrder: number; active: boolean }) {
-  return run(async () => {
-    await requireRole("ADMIN");
-    const input = z.object({
-      id: z.uuid().optional(),
-      name: z.string().trim().min(2, "Nom obligatoire.").max(60),
-      isFrequent: z.boolean(),
-      sortOrder: z.number().int().min(0).max(9999),
-      active: z.boolean(),
-    }).parse(raw);
-    try {
-      if (input.id) await db.update(itemTypes).set({ ...input, updatedAt: new Date() }).where(eq(itemTypes.id, input.id));
-      else await db.insert(itemTypes).values(input);
-    } catch (e) { uniqueName(e); }
-    refresh();
-    return undefined;
-  });
-}
-
 export async function upsertService(raw: { id?: string; name: string; shortName: string; active: boolean }) {
   return run(async () => {
     await requireRole("ADMIN");

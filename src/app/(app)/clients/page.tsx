@@ -26,7 +26,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       </form>
       <div className="overflow-hidden rounded-lg border border-line bg-surface shadow-card">
         {data.rows.length === 0 ? (
-          <EmptyState icon={<Users />} title={q ? "Aucun client trouvé" : "Aucun client"}>{q ? "Vérifiez l'orthographe ou le numéro (3 caractères minimum)." : "Les clients sont créés lors du dépôt."}</EmptyState>
+          <EmptyState icon={<Users />} title={q ? "Aucun client trouvé" : "Aucun client"}>{q ? "Vérifiez l'orthographe ou le numéro (2 caractères minimum)." : "Les clients sont créés lors du dépôt."}</EmptyState>
         ) : (
           <ul className="divide-y divide-line">
             <li className="hidden grid-cols-[1fr_180px_120px_140px_24px] gap-4 bg-canvas/70 px-5 py-2.5 text-[12.5px] font-medium uppercase tracking-[0.04em] text-ink-3 sm:grid">

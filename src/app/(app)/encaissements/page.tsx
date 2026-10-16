@@ -12,6 +12,7 @@ import { formatAmount } from "@/lib/domain/money";
 import { inTz, TZ } from "@/lib/domain/dates";
 import { METHOD_LABEL, METHODS } from "@/lib/domain/cash";
 import { cn } from "@/lib/cn";
+import { formatOrderNumber } from "@/lib/domain/order-number";
 
 export const metadata = { title: "Encaissements du jour" };
 
@@ -71,7 +72,7 @@ export default async function DayPaymentsPage({ searchParams }: { searchParams: 
                 <Link href={`/commandes/${p.orderId}`} className={cn("flex items-center gap-4 px-5 py-3 hover:bg-canvas", p.voided && "opacity-55")}>
                   <span className="w-12 shrink-0 text-[13px] text-ink-3 tnum">{format(inTz(p.at), "HH:mm")}</span>
                   <div className="min-w-0 flex-1">
-                    <p className={cn("truncate font-medium", p.voided && "line-through")}>N° {p.orderNumber} · {p.customer}</p>
+                    <p className={cn("truncate font-medium", p.voided && "line-through")}>N° {formatOrderNumber(p.orderNumber)} · {p.customer}</p>
                     <p className="truncate text-[13px] text-ink-3">{METHOD_LABEL[p.method]}{p.reference && ` · ${p.reference}`}{isAdmin && p.agent && ` · ${p.agent}`}{p.voided && p.voidReason && ` · annulé : ${p.voidReason}`}</p>
                   </div>
                   {p.voided && <Badge className="hidden bg-danger-50 text-danger ring-danger/20 sm:inline-flex">Annulé</Badge>}

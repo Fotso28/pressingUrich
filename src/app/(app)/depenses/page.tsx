@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { TZDate } from "@date-fns/tz";
 import { pageAdmin } from "@/server/session";
-import { availableMonths, expensesByCategory, listMoneyOut, salaryStaff, salesBetween } from "@/server/queries/finance";
+import { availableMonths, expensesByCategory, listMoneyOut, salariesForPeriod, salaryStaff, salesBetween } from "@/server/queries/finance";
 import { Card, CardHeader, EmptyState, PageHeader, Stat } from "@/components/ui/card";
 import { CategoryBars } from "@/components/charts/category-bars";
 import { formatAmount } from "@/lib/domain/money";
@@ -28,7 +28,9 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const [sales, cats, moves, staff, months] = await Promise.all([salesBetween(from, to), expensesByCategory(from, to), listMoneyOut(from, to), salaryStaff(), availableMonths()]);
   const totalOut = cats.reduce((s, c) => s + c.total, 0);
   const profit = sales - totalOut;
-  const salaries = moves.filter((x) => x.category === "SALAIRES" && !x.voided);
+  // Carte des salaires : selon le mois de salaire (un salaire d'octobre payé début novembre compte pour octobre).
+  const salaries = await salariesForPeriod(period);
+  const paidThisMonth = moves.filter((x) => x.category === "SALAIRES" && !x.voided);
 
   return (
     <>
@@ -44,7 +46,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         <Stat label="Ventes encaissées" value={formatAmount(sales)} sub="FCFA" />
         <Stat label="Dépenses" value={formatAmount(totalOut)} sub={`FCFA · ${moves.filter((x) => !x.voided).length} sortie(s)`} />
         <Stat label="Bénéfice" value={formatAmount(profit)} sub={sales ? `FCFA · marge ${Math.round((profit / sales) * 100)} %` : "FCFA"} tone={profit >= 0 ? "success" : "danger"} />
-        <Stat label="Salaires versés" value={formatAmount(salaries.reduce((s, x) => s + x.amount, 0))} sub={`FCFA · ${salaries.length} paiement(s)`} />
+        <Stat label="Salaires versés" value={formatAmount(paidThisMonth.reduce((s, x) => s + x.amount, 0))} sub={`FCFA · ${paidThisMonth.length} paiement(s) ce mois-ci`} />
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">

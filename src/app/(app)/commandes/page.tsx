@@ -63,7 +63,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
       <form className="mb-5 flex flex-wrap items-center gap-2" action="/commandes">
         <input type="hidden" name="tab" value={tab} />
-        <Link href={qs(base, { retard: sp.retard === "1" ? undefined : "1", page: undefined })} className={chip(sp.retard === "1")}>En retard</Link>
+        {/* « En retard » n'a de sens que pour les commandes encore à l'atelier. */}
+        {(tab === "a-traiter" || tab === "toutes") && <Link href={qs(base, { retard: sp.retard === "1" ? undefined : "1", page: undefined })} className={chip(sp.retard === "1")}>En retard</Link>}
         <Link href={qs(base, { impaye: sp.impaye === "1" ? undefined : "1", page: undefined })} className={chip(sp.impaye === "1")}>Impayées</Link>
         <span className="mx-1 hidden h-6 w-px bg-line sm:block" />
         {sp.retard && <input type="hidden" name="retard" value="1" />}

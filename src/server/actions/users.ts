@@ -10,7 +10,7 @@ import { auth } from "../auth";
 import { requireRole } from "../session";
 import { fail, run } from "../action-utils";
 
-const passwordSchema = z.string().min(6, "Mot de passe : 6 caractères minimum.").max(128);
+const passwordSchema = z.string().min(8, "Mot de passe : 8 caractères minimum.").max(128);
 
 function authMessage(e: unknown): never {
   const msg = (e as { body?: { message?: string }; message?: string })?.body?.message ?? (e as Error)?.message;
@@ -77,6 +77,18 @@ export async function setUserRole(raw: { userId: string; role: "ADMIN" | "AGENT"
     if (userId === me.id) fail("Vous ne pouvez pas changer votre propre rôle.");
     await auth.api.setRole({ headers: await headers(), body: { userId, role } });
     revalidatePath("/parametres/utilisateurs");
+    return undefined;
+  });
+}
+
+/** Renommer un compte (nom affiché sur les tickets, la caisse et les salaires). */
+export async function renameUser(raw: { userId: string; name: string }) {
+  return run(async () => {
+    await requireRole("ADMIN");
+    const { userId, name } = z.object({ userId: z.string().min(1), name: z.string().trim().min(2, "Nom obligatoire.").max(80, "Nom trop long.") }).parse(raw);
+    const res = await db.update(userTable).set({ name, updatedAt: new Date() }).where(eq(userTable.id, userId)).returning({ id: userTable.id });
+    if (!res.length) fail("Compte introuvable.");
+    revalidatePath("/", "layout");
     return undefined;
   });
 }

@@ -28,6 +28,7 @@ export function Ticket({ o, s, kind = "ticket", agentName }: { o: OrderDetail; s
     <div className="ticket">
       <TicketHeader s={s} />
       <div className="big">{kind === "recu" ? "REÇU DE RETRAIT" : "TICKET"} N° {formatOrderNumber(o.order.number)}</div>
+      {o.order.status === "ANNULEE" && <div className="big c">*** COMMANDE ANNULÉE ***</div>}
       <div>Dépôt : {formatDateTime(o.order.createdAt)}</div>
       {kind === "recu" && o.order.collectedAt
         ? <div>Retrait : {formatDateTime(o.order.collectedAt)}</div>

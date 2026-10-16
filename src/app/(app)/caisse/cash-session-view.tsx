@@ -132,7 +132,19 @@ function ExpenseDialog({ open, onOpenChange, onDone }: { open: boolean; onOpenCh
   );
 }
 
-function CloseDialog({ rows, onClose, onDone }: { rows: CashSummaryRow[]; onClose: () => void; onDone: (id: string) => void }) {
+/** Gérant : clôturer la caisse d'un agent restée ouverte (oubli en fin de journée). */
+export function AdminCloseButton({ sessionId, rows }: { sessionId: string; rows: CashSummaryRow[] }) {
+  const [open, setOpen] = useState(false);
+  const router = useRouter();
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}><Lock />Clôturer cette caisse</Button>
+      {open && <CloseDialog rows={rows} sessionId={sessionId} onClose={() => setOpen(false)} onDone={(id) => router.push(`/caisse/${id}?cloture=1`)} />}
+    </>
+  );
+}
+
+function CloseDialog({ rows, sessionId, onClose, onDone }: { rows: CashSummaryRow[]; sessionId?: string; onClose: () => void; onDone: (id: string) => void }) {
   const [counted, setCounted] = useState<Record<Method, number | null>>({ ESPECES: null, MTN_MOMO: null, ORANGE_MONEY: null });
   const [comment, setComment] = useState("");
   const { exec, pending } = useAction();
@@ -144,7 +156,7 @@ function CloseDialog({ rows, onClose, onDone }: { rows: CashSummaryRow[]; onClos
       <DialogContent wide title="Clôturer la caisse" description="Comptez l'argent pour chaque mode ; l'écart se calcule en direct.">
         <form className="space-y-5" onSubmit={(e) => {
           e.preventDefault();
-          exec(() => closeCashSession({ counts: { ESPECES: counted.ESPECES ?? 0, MTN_MOMO: counted.MTN_MOMO ?? 0, ORANGE_MONEY: counted.ORANGE_MONEY ?? 0 }, comment }),
+          exec(() => closeCashSession({ counts: { ESPECES: counted.ESPECES ?? 0, MTN_MOMO: counted.MTN_MOMO ?? 0, ORANGE_MONEY: counted.ORANGE_MONEY ?? 0 }, comment, sessionId }),
             { success: "Caisse clôturée.", onSuccess: (d) => onDone(d.sessionId) });
         }}>
           <div className="divide-y divide-line rounded-lg border border-line">

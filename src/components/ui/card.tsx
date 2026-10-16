@@ -1,3 +1,4 @@
+import Link from "next/link";
 import * as React from "react";
 import { cn } from "@/lib/cn";
 
@@ -56,7 +57,7 @@ export function Stat({ label, value, sub, tone, href }: {
     </>
   );
   return href ? (
-    <a href={href} className="block rounded-lg border border-line bg-surface p-5 shadow-card transition hover:border-line-2 hover:shadow-pop/40">{inner}</a>
+    <Link href={href} className="block rounded-lg border border-line bg-surface p-5 shadow-card transition hover:border-line-2 hover:shadow-pop/40">{inner}</Link>
   ) : (
     <div className="rounded-lg border border-line bg-surface p-5 shadow-card">{inner}</div>
   );

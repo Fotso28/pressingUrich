@@ -111,3 +111,14 @@ describe("formats", () => {
     expect(formatLabelNumber(482, 2)).toBe("000482-02");
   });
 });
+
+import { toCsv } from "../csv";
+describe("export CSV", () => {
+  it("neutralise les formules (injection Excel)", () => {
+    const csv = toCsv(["Nom"], [["=HYPERLINK(\"http://x\")"], ["+33"], ["Ngono Marie"], [-500]]);
+    expect(csv).toContain("'=HYPERLINK");
+    expect(csv).toContain("'+33");
+    expect(csv).toContain("Ngono Marie");
+    expect(csv).toContain("\r\n-500"); // les nombres négatifs restent des nombres
+  });
+});

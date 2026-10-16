@@ -42,7 +42,3 @@ export function computeOrderTotals(
   const discountPct = gross > 0 ? (discountAmount / gross) * 100 : 0;
   return { subtotal, expressAmount, discountAmount, total, discountPct };
 }
-
-export function lineTotal(l: LineInput): number {
-  return Math.round(l.unitPrice) * Math.round(l.quantity);
-}

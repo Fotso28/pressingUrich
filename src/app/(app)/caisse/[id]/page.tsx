@@ -8,8 +8,10 @@ import { PrintButton } from "@/components/print-button";
 import { Money } from "@/components/money";
 import { METHOD_LABEL } from "@/lib/domain/cash";
 import { formatDateTime } from "@/lib/domain/dates";
+import { formatAmount } from "@/lib/domain/money";
 import { formatOrderNumber } from "@/lib/domain/order-number";
 import { cn } from "@/lib/cn";
+import { AdminCloseButton } from "../cash-session-view";
 
 export default async function CashSessionPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ cloture?: string }> }) {
   const user = await pageUser();
@@ -30,9 +32,10 @@ export default async function CashSessionPage({ params, searchParams }: { params
           <p className="mt-1 text-[15px] text-ink-3 tnum">Ouverte le {formatDateTime(s.session.openedAt)}{s.session.closedAt && ` · clôturée le ${formatDateTime(s.session.closedAt)}`}</p>
         </div>
         {closed && <PrintButton href={`/print/caisse/${s.session.id}`}>Imprimer le récapitulatif</PrintButton>}
+        {!closed && user.role === "ADMIN" && s.session.userId !== user.id && <AdminCloseButton sessionId={s.session.id} rows={s.rows} />}
       </div>
       <Card>
-        <CardHeader title={closed ? "Clôture" : "Situation"} description={`Fond de caisse : ${s.session.openingFloat.toLocaleString("fr-FR")} FCFA`} />
+        <CardHeader title={closed ? "Clôture" : "Situation"} description={`Fond de caisse : ${formatAmount(s.session.openingFloat)} FCFA`} />
         <div className="overflow-x-auto border-t border-line">
         <table className="w-full text-[14.5px]">
           <thead><tr className="text-left text-[12.5px] font-medium uppercase tracking-[0.04em] text-ink-3"><th className="px-5 py-2.5">Mode</th><th className="px-3 py-2.5 text-right">Attendu</th>{closed && <><th className="px-3 py-2.5 text-right">Compté</th><th className="px-5 py-2.5 text-right">Écart</th></>}</tr></thead>

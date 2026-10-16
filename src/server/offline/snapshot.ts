@@ -5,6 +5,7 @@ import { cashSessions, customers, expenses, orderItems, orders, payments, reserv
 import { getDepositCatalog } from "../queries/catalog";
 import { getSettings } from "../queries/settings";
 import { METHODS, type Method } from "@/lib/domain/cash";
+import { formatOrderNumber } from "@/lib/domain/order-number";
 import { NUMBER_BLOCK, REFILL_WHEN_LEFT, type OfflineOrder, type OfflineSession, type Snapshot } from "@/lib/offline/types";
 
 /**
@@ -65,7 +66,7 @@ async function openSession(userId: string): Promise<OfflineSession | null> {
   return {
     id: s.id, openedAt: s.openedAt.toISOString(), openingFloat: s.openingFloat, received, spent,
     moves: [
-      ...pays.map(({ p, number }) => ({ id: p.id, kind: "PAIEMENT" as const, label: `Ticket n° ${number}`, method: p.method, amount: p.amount, at: p.createdAt.toISOString() })),
+      ...pays.map(({ p, number }) => ({ id: p.id, kind: "PAIEMENT" as const, label: `Ticket n° ${formatOrderNumber(Number(number))}`, method: p.method, amount: p.amount, at: p.createdAt.toISOString() })),
       ...exps.map((e) => ({ id: e.id, kind: "DEPENSE" as const, label: e.label, method: e.method, amount: e.amount, at: e.createdAt.toISOString() })),
     ].sort((a, b) => b.at.localeCompare(a.at)),
   };

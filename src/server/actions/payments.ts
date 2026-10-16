@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { formatAmount } from "@/lib/domain/money";
 import { db } from "../db";
 import { cashSessions, orders, payments } from "../db/schema";
 import { requireRole, requireUser } from "../session";
@@ -31,7 +32,7 @@ export async function addPayment(raw: z.input<typeof addPaymentSchema>) {
         if (o.status === "ANNULEE") fail("Commande annulée : encaissement impossible.");
         const remaining = o.total - o.amountPaid;
         if (remaining <= 0) fail("Cette commande est déjà soldée.");
-        if (input.amount > remaining) fail(`Montant supérieur au reste à payer (${remaining} FCFA).`);
+        if (input.amount > remaining) fail(`Montant supérieur au reste à payer (${formatAmount(remaining)} FCFA).`);
         const [s] = await tx.select({ id: cashSessions.id }).from(cashSessions)
           .where(and(eq(cashSessions.userId, user.id), eq(cashSessions.status, "OUVERTE"))).limit(1);
         if (!s) fail("Ouvrez votre caisse avant d'encaisser.");
@@ -64,7 +65,10 @@ export async function voidPayment(raw: { paymentId: string; reason: string }) {
       const [p] = await tx.select().from(payments).where(and(eq(payments.id, paymentId), isNull(payments.voidedAt))).for("update");
       if (!p) fail("Paiement introuvable ou déjà annulé.");
       await tx.select({ id: orders.id }).from(orders).where(eq(orders.id, p.orderId)).for("update");
-      await tx.update(payments).set({ voidedAt: new Date(), voidedBy: user.id, voidReason: reason }).where(eq(payments.id, p.id));
+      // Correction après clôture : permise au gérant, mais tracée (les comptages de la clôture ne bougent pas).
+      const [sess] = await tx.select({ status: cashSessions.status }).from(cashSessions).where(eq(cashSessions.id, p.cashSessionId)).limit(1);
+      const note = sess?.status === "FERMEE" ? " (annulé après la clôture de caisse)" : "";
+      await tx.update(payments).set({ voidedAt: new Date(), voidedBy: user.id, voidReason: reason + note }).where(eq(payments.id, p.id));
       await tx.update(orders).set({ amountPaid: sql`${orders.amountPaid} - ${p.amount}`, updatedAt: new Date() })
         .where(eq(orders.id, p.orderId));
     });

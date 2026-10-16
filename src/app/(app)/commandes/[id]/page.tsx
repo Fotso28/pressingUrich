@@ -1,3 +1,6 @@
+import { eq } from "drizzle-orm";
+import { db } from "@/server/db";
+import { orders } from "@/server/db/schema";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Zap } from "lucide-react";
@@ -18,7 +21,9 @@ import { cn } from "@/lib/cn";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return { title: `Commande ${id.slice(0, 6)}` };
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return { title: "Commande" };
+  const [o] = await db.select({ number: orders.number }).from(orders).where(eq(orders.id, id)).limit(1);
+  return { title: o ? `Commande n° ${formatOrderNumber(o.number)}` : "Commande" };
 }
 
 export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {

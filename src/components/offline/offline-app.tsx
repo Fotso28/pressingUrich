@@ -48,14 +48,22 @@ export function OfflineApp() {
     const r = await syncNow();
     setSyncing(false);
     if (quiet) return;
-    if (r.unauthorized) toast.error("Session expirée : reconnectez-vous pour envoyer les opérations.", { duration: Infinity, closeButton: true });
+    for (const n of r.renumbered) toast.warning(`Ticket n° ${n.from} enregistré sous le n° ${n.to} : corrigez le ticket du client.`, { duration: Infinity, closeButton: true });
+    if (r.otherAccount) toast.error("Ces opérations ont été saisies avec un autre compte : reconnectez-vous avec ce compte pour les envoyer.", { duration: Infinity, closeButton: true });
+    else if (r.unauthorized) toast.error("Session expirée : reconnectez-vous pour envoyer les opérations.", { duration: Infinity, closeButton: true });
     else if (r.offline) toast.error("Toujours pas de connexion au serveur.");
     else if (r.failed) toast.warning(`${r.ok} opération(s) envoyée(s), ${r.failed} refusée(s).`, { duration: 8000 });
     else toast.success(r.sent ? `${r.ok} opération(s) synchronisée(s).` : "Données à jour.");
   }, []);
 
   // Au retour du réseau : envoi automatique de la file.
-  useEffect(() => { if (online) void syncNow(); }, [online]);
+  useEffect(() => {
+    if (!online) return;
+    void syncNow();
+    // Tant que des opérations attendent, nouvel essai chaque minute (réseau revenu mais serveur pas encore joignable…).
+    const id = setInterval(() => { void loadState().then((s) => { if (s?.queue.length) void syncNow(); }); }, 60_000);
+    return () => clearInterval(id);
+  }, [online]);
 
   const { print, node } = useOfflinePrint(state?.settings ?? { shopName: "", address: null, phones: null, ticketFooter: null, website: null, paperFormat: "THERMAL_80", standardDelayHours: 48, expressDelayHours: 24, expressRatePct: 50 });
 
@@ -259,7 +267,9 @@ function OrderDialog({ state, order: o, onClose, print }: { state: OfflineState;
     toast.success("Encaissement enregistré.");
     setAmount(null);
   };
+  const notReadyBlocked = o.status !== "PRETE" && state.user.role !== "ADMIN";
   const collect = async () => {
+    if (notReadyBlocked) return;
     if (o.status !== "PRETE" && !confirmNotReady) { setConfirmNotReady(true); return; }
     await perform({ type: "COLLECT_ORDER", opId: uuid(), at: nowIso(), orderId: o.id });
     toast.success("Retrait enregistré.");
@@ -284,10 +294,11 @@ function OrderDialog({ state, order: o, onClose, print }: { state: OfflineState;
             <Button block onClick={pay} disabled={!amount || amount > rest}><Banknote />Encaisser <Money value={amount ?? 0} unit={false} /></Button>
           </div>
         )}
+        {notReadyBlocked && o.status !== "RETIREE" && <p className="mt-3 rounded-md bg-warning-50 px-3 py-2 text-sm text-[#8a5300]">Commande pas encore prête : seul le gérant peut la remettre au client.</p>}
         {confirmNotReady && <p className="mt-3 rounded-md bg-warning-50 px-3 py-2 text-sm text-[#8a5300]">Cette commande n&apos;est pas marquée « prête ». Touchez à nouveau pour confirmer la remise au client.</p>}
         <DialogFooter>
           <Button variant="secondary" onClick={() => print(o, o.status === "RETIREE" ? "recu" : "ticket", state.user.name)}><Printer />{o.status === "RETIREE" ? "Reçu" : "Ticket"}</Button>
-          {o.status !== "RETIREE" && <Button onClick={collect} disabled={rest > 0} title={rest > 0 ? "Encaissez le solde d'abord" : undefined}><PackageCheck />{confirmNotReady ? "Confirmer le retrait" : "Remettre au client"}</Button>}
+          {o.status !== "RETIREE" && <Button onClick={collect} disabled={rest > 0 || notReadyBlocked} title={rest > 0 ? "Encaissez le solde d'abord" : undefined}><PackageCheck />{confirmNotReady ? "Confirmer le retrait" : "Remettre au client"}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

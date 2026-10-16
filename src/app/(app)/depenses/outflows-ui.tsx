@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Wallet, X, Pencil, Trash2, UserPlus, ShoppingBasket, Users, Home, Zap, Droplets, Tv, Truck, Wrench, Landmark, MoreHorizontal } from "lucide-react";
@@ -175,8 +176,10 @@ function OutflowDialog({ salary, staff, defaultPeriod, defaultUserId, edit, onCl
       <DialogContent wide title={edit ? (isSalary ? "Modifier le paiement de salaire" : "Modifier la sortie") : isSalary ? "Payer un salaire" : "Nouvelle sortie d'argent"} description={isSalary ? "Le paiement est enregistré dans les dépenses du mois." : "Achat d'intrants, loyer, facture, réparation…"}>
         <form className="space-y-5" onSubmit={(e) => {
           e.preventDefault();
+          const date = fromDateTimeLocal(when);
+          if (Number.isNaN(date.getTime())) { toast.error("Date invalide."); return; }
           const input = {
-            occurredAt: fromDateTimeLocal(when).toISOString(), category, label: isSalary ? "Salaire" : label,
+            occurredAt: date.toISOString(), category, label: isSalary ? "Salaire" : label,
             amount: amount ?? 0, method, beneficiary: isSalary ? undefined : beneficiary, beneficiaryUserId: isSalary ? employeeId : null,
             salaryPeriod: isSalary ? period : null, notes,
           };

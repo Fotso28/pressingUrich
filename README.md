@@ -90,6 +90,19 @@ Le ticket occupe toute la largeur du papier choisi à l'impression (rouleau 80 m
 mini-factures par défaut, 58 mm, B7, A4…) et continue sur plusieurs pages si besoin. Format de référence et site
 internet dans Paramètres › Pressing.
 
+## Passage en production réelle (checklist)
+
+1. **Effacer le jeu de démonstration** : dans Vercel › Settings › Environment Variables (Production), ajouter
+   `PURGE_DEMO_DATA=1` et **supprimer `SEED_DEMO`**, puis redéployer. Le build efface commandes, clients,
+   caisses, paiements, dépenses, numéros réservés et comptes de démo (`paul`, `brigitte`) ; le catalogue,
+   les paramètres et le compte du gérant sont conservés. Retirer ensuite `PURGE_DEMO_DATA`.
+   Garde-fou : sans marqueur de démonstration (`app_meta.demo_version`), aucune donnée n'est jamais effacée.
+2. **Mots de passe** : le gérant change le sien (Paramètres › Utilisateurs › Changer mon mot de passe,
+   8 caractères minimum) et crée les comptes réels des agents, avec leur salaire de base (Dépenses).
+3. **Paramètres › Pressing** : nom, adresse, téléphones, site internet, mention du ticket, délais, format du papier.
+4. **Catalogue** : vérifier articles, services et tarifs.
+5. **Chaque appareil du comptoir** : se connecter une fois avec internet (copie hors ligne + 200 numéros réservés).
+
 ## Déploiement (Vercel + Neon)
 
 1. **Neon** : créer un projet en région `aws-eu-central-1` (Francfort) et copier la chaîne de connexion.

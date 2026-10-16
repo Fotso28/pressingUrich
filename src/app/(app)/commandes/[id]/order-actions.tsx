@@ -1,5 +1,7 @@
 "use client";
 
+import { toast } from "sonner";
+import { formatAmount } from "@/lib/domain/money";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -189,7 +191,7 @@ export function VoidPaymentButton({ paymentId, amount }: { paymentId: string; am
         <X className="size-3.5" />
       </button>
       <ReasonDialog open={open} onOpenChange={setOpen} title="Annuler le paiement" danger confirm="Annuler le paiement"
-        description={`Le paiement de ${amount.toLocaleString("fr-FR")} FCFA restera visible, marqué annulé.`}
+        description={`Le paiement de ${formatAmount(amount)} FCFA restera visible, marqué annulé.`}
         onConfirm={(reason) => exec(() => voidPayment({ paymentId, reason }), { success: "Paiement annulé.", onSuccess: () => { setOpen(false); router.refresh(); } })} />
     </>
   );
@@ -209,8 +211,10 @@ function EditDialog({ order, onClose, onDone }: { order: OrderLite; onClose: () 
       <DialogContent wide title="Modifier la commande" description="Les prix des lignes restent ceux du dépôt. La modification est tracée.">
         <form className="space-y-5" onSubmit={(e) => {
           e.preventDefault();
+          const dueDate = fromDateTimeLocal(due);
+          if (Number.isNaN(dueDate.getTime())) { toast.error("Date de retrait invalide."); return; }
           exec(() => updateOrder({
-            orderId: order.id, isExpress, dueAt: fromDateTimeLocal(due).toISOString(),
+            orderId: order.id, isExpress, dueAt: dueDate.toISOString(),
             discount: discountValue ? { type: discountType, value: discountValue } : null, notes,
             lines: items.map(({ id, quantity, color, brand, observations }) => ({ id, quantity, color, brand, observations })),
           }), { success: "Commande modifiée.", onSuccess: onDone });

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { pageUser } from "@/server/session";
 import { getCashSessionSummary } from "@/server/queries/cash";
 import { getSettings } from "@/server/queries/settings";
 import { TicketHeader } from "@/components/ticket";
@@ -9,8 +10,9 @@ import { formatDateTime } from "@/lib/domain/dates";
 export default async function CashPrint({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const [s, settings] = await Promise.all([getCashSessionSummary(id), getSettings()]);
-  if (!s) notFound();
+  const [u, s, settings] = await Promise.all([pageUser(), getCashSessionSummary(id), getSettings()]);
+  // Un agent n'imprime que ses propres clôtures.
+  if (!s || (u.role !== "ADMIN" && s.session.userId !== u.id)) notFound();
   const voidless = (xs: { voidedAt: Date | null }[]) => xs.filter((x) => !x.voidedAt).length;
   return (
     <div className="ticket">

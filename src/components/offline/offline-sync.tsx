@@ -13,6 +13,8 @@ export function OfflineSync() {
     const run = async () => {
       const r = await syncNow();
       if (r.ok) toast.success(`${r.ok} opération(s) faite(s) hors ligne synchronisée(s).`);
+      for (const n of r.renumbered) toast.warning(`Ticket hors ligne n° ${n.from} enregistré sous le n° ${n.to} : corrigez le ticket du client.`, { duration: Infinity, closeButton: true });
+      if (r.otherAccount) toast.error("Des opérations hors ligne d'un autre compte attendent sur cet appareil : reconnectez-vous avec ce compte pour les envoyer.", { duration: Infinity, closeButton: true });
       if (r.failed) toast.error(`${r.failed} opération(s) hors ligne refusée(s) : ${r.errors.join(" · ")}`, { duration: Infinity, closeButton: true });
     };
     void run();
