@@ -14,6 +14,6 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Exclut la connexion, l'API, les fichiers Next et tout fichier statique (extension) : logo, icônes, sw.js…
-  matcher: ["/((?!login|api|_next|manifest.webmanifest|.*\\.[a-zA-Z0-9]+$).*)"],
+  // Exclut la connexion, le mode hors ligne (page statique mise en cache), l'API, les fichiers Next et tout fichier statique (extension) : logo, icônes, sw.js…
+  matcher: ["/((?!login|hors-ligne|api|_next|manifest.webmanifest|.*\\.[a-zA-Z0-9]+$).*)"],
 };

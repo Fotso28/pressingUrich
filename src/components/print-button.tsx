@@ -21,7 +21,7 @@ export function PrintButton({ href, children, ...props }: ButtonProps & { href: 
           setLoading(false);
           setTimeout(() => iframe.remove(), 60_000);
         }
-      }, 250);
+      }, 500);
     };
     document.body.appendChild(iframe);
   }

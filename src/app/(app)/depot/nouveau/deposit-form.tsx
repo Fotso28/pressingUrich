@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Minus, Plus, Trash2, ChevronDown, Zap, Search, ArrowLeft, ArrowRight, Check, MessageSquareText, Lock, X } from "lucide-react";
-import { createOrder } from "@/server/actions/orders";
+import { createOrder, type CreateOrderInput } from "@/server/actions/orders";
 import type { DepositCatalog } from "@/server/queries/catalog";
 import { CustomerPicker, type PickedCustomer } from "@/components/customers/customer-picker";
 import { Button } from "@/components/ui/button";
@@ -27,12 +27,22 @@ const STEPS = ["client", "articles", "options", "paiement"] as const;
 type Step = (typeof STEPS)[number];
 const STEP_LABEL: Record<Step, string> = { client: "Client", articles: "Articles", options: "Options", paiement: "Paiement" };
 
-export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin, settings }: {
+type SubmitResult = { ok: true; data: { id: string; number: number } } | { ok: false; error: string };
+
+export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin, settings, offline }: {
   catalog: DepositCatalog;
   initialCustomer: PickedCustomer | null;
   hasOpenSession: boolean;
   isAdmin: boolean;
   settings: { standardDelayHours: number; expressDelayHours: number; expressRatePct: number; agentMaxDiscountPct: number };
+  /** Mode hors ligne : sélecteur de clients local, enregistrement local, pas de remise. */
+  offline?: {
+    customerPicker: (value: PickedCustomer | null, onChange: (c: PickedCustomer | null) => void) => React.ReactNode;
+    submit: (input: CreateOrderInput) => Promise<SubmitResult>;
+    onDone: (data: { id: string; number: number }) => void;
+    onOpenCash: () => void;
+    blockedReason?: string | null;
+  };
 }) {
   const router = useRouter();
   const { exec, pending } = useAction();
@@ -87,12 +97,14 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
   const updateLine = (key: string, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
   const canNext: Record<Step, boolean> = { client: !!customer, articles: lines.length > 0, options: !discountTooHigh, paiement: true };
-  const canSubmit = !!customer && lines.length > 0 && !discountTooHigh && !depositTooHigh && !depositBlocked;
+  const blockedReason = offline?.blockedReason ?? null;
+  const canSubmit = !!customer && lines.length > 0 && !discountTooHigh && !depositTooHigh && !depositBlocked && !blockedReason;
 
   async function submit() {
     if (!customer) { setStep("client"); return; }
     const dueDate = fromDateTimeLocal(dueValue);
-    await exec(() => createOrder({
+    const send = (input: CreateOrderInput) => (offline ? offline.submit(input) : createOrder(input));
+    await exec(() => send({
       idempotencyKey,
       customerId: customer.id,
       lines: lines.map((l) => ({ itemTypeId: l.itemTypeId, serviceId: l.serviceId, quantity: l.quantity, color: l.color, brand: l.brand, observations: l.observations })),
@@ -101,7 +113,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
       discount,
       notes,
       deposit: deposit ? { idempotencyKey: depositKey, amount: deposit, method, reference: method === "ESPECES" ? "" : reference } : null,
-    }), { onSuccess: (d) => router.push(`/depot/confirmation/${d.id}`) });
+    }), { onSuccess: (d) => (offline ? offline.onDone(d) : router.push(`/depot/confirmation/${d.id}`)) });
   }
 
   const vis = (s: Step) => cn(step !== s && "hidden", "lg:block");
@@ -114,7 +126,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
           <h1 className="text-xl font-semibold tracking-[-0.01em] lg:text-2xl">Nouveau dépôt</h1>
           <p className="mt-1 hidden text-[15px] text-ink-3 lg:block">Client, articles, options, acompte.</p>
         </div>
-        <Link href="/" className="grid size-10 place-items-center rounded-md text-ink-3 hover:bg-subtle lg:hidden" aria-label="Quitter le dépôt"><X className="size-5" /></Link>
+        {!offline && <Link href="/" className="grid size-10 place-items-center rounded-md text-ink-3 hover:bg-subtle lg:hidden" aria-label="Quitter le dépôt"><X className="size-5" /></Link>}
       </div>
 
       {/* Progression (téléphone) */}
@@ -134,7 +146,10 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
         <div className="space-y-6">
           <section className={cn(vis("client"), "rounded-lg border border-line bg-surface p-4 shadow-card sm:p-5")}>
             <StepTitle n={1} title="Client" done={!!customer} />
-            <CustomerPicker value={customer} onChange={(c) => { setCustomer(c); if (c && window.innerWidth < 1024) setStep("articles"); }} />
+            {(() => {
+              const pick = (c: PickedCustomer | null) => { setCustomer(c); if (c && window.innerWidth < 1024) setStep("articles"); };
+              return offline ? offline.customerPicker(customer, pick) : <CustomerPicker value={customer} onChange={pick} />;
+            })()}
           </section>
 
           <section className={cn(vis("articles"), "rounded-lg border border-line bg-surface p-4 shadow-card sm:p-5")}>
@@ -262,7 +277,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
               <Field label="Retrait prévu" htmlFor="due" hint={dueEdited ? <button type="button" className="text-brand" onClick={() => setDueEdited(null)}>Revenir au calcul automatique</button> : "Calculé automatiquement, modifiable."}>
                 <Input id="due" type="datetime-local" value={dueValue} onChange={(e) => setDueEdited(e.target.value)} className="tnum" />
               </Field>
-              <Field label="Remise" error={discountTooHigh ? `Au-delà de ${settings.agentMaxDiscountPct} %, la remise est réservée au gérant.` : undefined}>
+              {!offline && <Field label="Remise" error={discountTooHigh ? `Au-delà de ${settings.agentMaxDiscountPct} %, la remise est réservée au gérant.` : undefined}>
                 <div className="flex gap-2">
                   <div className="flex rounded-md border border-line-2 p-0.5">
                     {(["MONTANT", "POURCENT"] as const).map((t) => (
@@ -279,7 +294,7 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
                           onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); setDiscountValue(d ? Math.min(100, parseInt(d, 10)) : null); }} />}
                   </div>
                 </div>
-              </Field>
+              </Field>}
               <Field label="Notes" htmlFor="notes"><Textarea id="notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Instructions particulières" /></Field>
             </div>
           </section>
@@ -312,7 +327,9 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
                   {depositBlocked && (
                     <p className="flex flex-wrap items-center gap-2 rounded-md bg-warning-50 px-3 py-2 text-sm text-[#8a5300]">
                       <Lock className="size-4" /> Caisse fermée : impossible d&apos;encaisser.
-                      <Link href="/caisse" className="font-semibold underline">Ouvrir ma caisse</Link>
+                      {offline
+                        ? <button type="button" onClick={offline.onOpenCash} className="font-semibold underline">Ouvrir ma caisse</button>
+                        : <Link href="/caisse" className="font-semibold underline">Ouvrir ma caisse</Link>}
                     </p>
                   )}
                   <p className="flex justify-between text-sm text-ink-2"><span>Reste à payer au retrait</span><Money value={Math.max(0, totals.total - (deposit ?? 0))} strong /></p>
@@ -321,7 +338,10 @@ export function DepositForm({ catalog, initialCustomer, hasOpenSession, isAdmin,
               <SaveButton type="button" size="xl" block loading={pending} disabled={!canSubmit} onClick={submit} className="mt-2 hidden lg:inline-flex">
                 <Check /> Valider le dépôt
               </SaveButton>
-              {!canSubmit && (
+              {blockedReason && (
+                <p className="flex items-start gap-2 rounded-md bg-danger-50 px-3 py-2.5 text-sm font-medium text-danger"><Lock className="mt-0.5 size-4 shrink-0" />{blockedReason}</p>
+              )}
+              {!canSubmit && !blockedReason && (
                 <p className="hidden text-center text-[13px] text-ink-3 lg:block">
                   {!customer ? "Choisissez un client." : lines.length === 0 ? "Ajoutez au moins un article." : "Corrigez les champs signalés."}
                 </p>

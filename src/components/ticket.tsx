@@ -14,6 +14,7 @@ export function TicketHeader({ s }: { s: Settings }) {
       <h1>{s.shopName.toUpperCase()}</h1>
       {s.address && <div className="c">{s.address}</div>}
       {s.phones && <div className="c">{s.phones}</div>}
+      {s.website && <div className="c">{s.website}</div>}
       <hr />
     </>
   );

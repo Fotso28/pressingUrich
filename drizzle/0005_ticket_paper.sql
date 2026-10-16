@@ -1,0 +1,2 @@
+ALTER TABLE "settings" ADD COLUMN "website" text DEFAULT 'https://continentalmarket237.com/';--> statement-breakpoint
+ALTER TABLE "settings" ADD COLUMN "paper_format" text DEFAULT 'THERMAL_80' NOT NULL;

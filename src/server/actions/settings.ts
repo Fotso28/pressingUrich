@@ -12,6 +12,8 @@ const schema = z.object({
   address: z.string().trim().max(200),
   phones: z.string().trim().max(100),
   ticketFooter: z.string().trim().max(300),
+  website: z.string().trim().max(120),
+  paperFormat: z.enum(["THERMAL_80", "THERMAL_58", "B7"]),
   standardDelayHours: z.number().int().min(1).max(24 * 60),
   expressDelayHours: z.number().int().min(1).max(24 * 60),
   expressRatePct: z.number().int().min(0).max(500),

@@ -10,6 +10,8 @@ import { cn } from "@/lib/cn";
 import { authClient } from "@/lib/auth-client";
 import { OnlineProvider, useOnline } from "./online";
 import { GlobalSearch } from "./global-search";
+import { OfflineSync } from "@/components/offline/offline-sync";
+import { clearState, loadState } from "@/lib/offline/store";
 
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }>; admin?: boolean; match?: (p: string) => boolean };
 
@@ -62,6 +64,9 @@ function ShellInner({ user, shopName, children }: { user: ShellUser; shopName: s
 
   async function logout() {
     setLoggingOut(true);
+    // La copie hors ligne est effacée à la déconnexion, sauf s'il reste des opérations à envoyer.
+    const offline = await loadState();
+    if (offline && offline.queue.length === 0) await clearState();
     await authClient.signOut();
     router.replace("/login");
     router.refresh();
@@ -69,6 +74,7 @@ function ShellInner({ user, shopName, children }: { user: ShellUser; shopName: s
 
   return (
     <div className="min-h-dvh overflow-x-clip lg:pl-60">
+      <OfflineSync />
       {/* Barre latérale (PC, tablette paysage) */}
       <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-line bg-surface lg:flex">
         <Link href="/" className="flex h-[76px] items-center px-5" aria-label={shopName}>

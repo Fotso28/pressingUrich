@@ -65,6 +65,31 @@ Tous les montants sont des multiples de 100 FCFA, le plus souvent de 500.
 régénéré une seule fois quand `DEMO_VERSION` change dans `scripts/seed-demo.ts` : **retirez `SEED_DEMO`
 des variables Vercel avant de saisir de vraies données.**
 
+## Mode hors ligne
+
+L'application installée (PWA) s'ouvre et reste utilisable au comptoir sans connexion internet.
+
+- **Ouverture sans réseau** : le service worker garde l'interface en cache ; toute page ouverte sans
+  réseau affiche `/hors-ligne`, qui travaille sur une copie locale (IndexedDB).
+- **Copie locale** (`GET /api/offline/snapshot`), rafraîchie au chargement de l'application, toutes les
+  5 minutes et au retour du réseau : catalogue et tarifs, clients, commandes en cours, caisse ouverte,
+  paramètres du ticket, et la session (valable 7 jours ; au-delà, reconnexion obligatoire).
+- **Opérations possibles hors ligne** : ouverture / dépenses / clôture de caisse, nouveaux clients,
+  dépôts (avec acompte), encaissements et retraits, impression des tickets et reçus.
+- **Numéros de ticket** : chaque compte reçoit un bloc de **200 numéros réservés** sur la séquence des
+  tickets (jamais attribués en ligne, donc sans doublon). Un nouveau bloc est ajouté quand 75 % sont
+  utilisés. Sans numéro disponible, le dépôt est bloqué : « connectez-vous à internet pour obtenir de
+  nouveaux numéros ».
+- **Synchronisation** (`POST /api/offline/sync`) : les opérations sont rejouées dans l'ordre, chacune dans
+  sa transaction et une seule fois (`offline_ops.op_id`). Une opération refusée est signalée à l'agent.
+  Hors périmètre : rapports, dépenses du gérant, paramètres (en ligne uniquement).
+
+## Impression
+
+Format par défaut : **rouleau 80 mm** des imprimantes de mini-factures (thermiques), longueur ajustée
+au contenu. Rouleau 58 mm et ISO B7 (88 × 125 mm) au choix dans Paramètres › Pressing, avec le site
+internet imprimé sur le ticket.
+
 ## Déploiement (Vercel + Neon)
 
 1. **Neon** : créer un projet en région `aws-eu-central-1` (Francfort) et copier la chaîne de connexion.

@@ -13,7 +13,8 @@ export function OnlineProvider({ children }: { children: React.ReactNode }) {
     <OnlineCtx.Provider value={online}>
       {!online && (
         <div role="alert" className="no-print sticky top-0 z-50 flex items-center justify-center gap-2 bg-danger px-4 py-2 text-sm font-medium text-white">
-          <WifiOff className="size-4" /> Connexion perdue — les enregistrements sont désactivés jusqu&apos;au retour du réseau.
+          <WifiOff className="size-4" /> Connexion perdue.
+          <a href="/hors-ligne" className="underline underline-offset-2">Passer en mode hors ligne</a>
         </div>
       )}
       {children}

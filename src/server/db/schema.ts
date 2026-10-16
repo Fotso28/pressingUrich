@@ -1,5 +1,5 @@
 import {
-  pgTable, pgEnum, pgSequence, uuid, text, integer, bigint, boolean,
+  pgTable, pgEnum, pgSequence, uuid, text, integer, jsonb, bigint, boolean,
   timestamp, uniqueIndex, index,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -95,6 +95,8 @@ export const settings = pgTable("settings", {
   address: text("address"),
   phones: text("phones"),
   ticketFooter: text("ticket_footer"),
+  website: text("website").default("https://continentalmarket237.com/"),
+  paperFormat: text("paper_format").notNull().default("THERMAL_80"), // THERMAL_80 | THERMAL_58 | B7
   standardDelayHours: integer("standard_delay_hours").notNull().default(48),
   expressDelayHours: integer("express_delay_hours").notNull().default(24),
   expressRatePct: integer("express_rate_pct").notNull().default(50),
@@ -293,3 +295,29 @@ export type OutflowMethod = (typeof outflowMethodEnum.enumValues)[number];
 export type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
 export type PaymentMethod = (typeof paymentMethodEnum.enumValues)[number];
 export type DiscountType = (typeof discountTypeEnum.enumValues)[number];
+
+// ---------------------------------------------------------------------------
+// Mode hors ligne
+// ---------------------------------------------------------------------------
+
+/** Numéros de ticket réservés à un compte pour travailler hors ligne (blocs de 200, renouvelés à 75 %). */
+export const reservedNumbers = pgTable("reserved_numbers", {
+  number: bigint("number", { mode: "number" }).primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id),
+  reservedAt: timestamp("reserved_at", { withTimezone: true }).notNull().defaultNow(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  orderId: uuid("order_id"),
+}, (t) => [index("reserved_numbers_user_idx").on(t.userId, t.usedAt)]);
+
+/** Opérations faites hors ligne et rejouées sur le serveur : clé d'idempotence et résultat. */
+export const offlineOps = pgTable("offline_ops", {
+  opId: uuid("op_id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id),
+  type: text("type").notNull(),
+  payload: jsonb("payload").notNull(),
+  ok: boolean("ok").notNull(),
+  result: jsonb("result"),
+  error: text("error"),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("offline_ops_user_idx").on(t.userId, t.syncedAt)]);

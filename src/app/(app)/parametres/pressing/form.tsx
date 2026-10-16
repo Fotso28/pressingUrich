@@ -7,9 +7,11 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { SaveButton } from "@/components/save-button";
 import { useAction } from "@/lib/use-action";
+import { cn } from "@/lib/cn";
+import { PAPER_FORMATS, type PaperFormat } from "@/components/print/ticket-css";
 
 type S = {
-  shopName: string; address: string; phones: string; ticketFooter: string;
+  shopName: string; address: string; phones: string; ticketFooter: string; website: string; paperFormat: PaperFormat;
   standardDelayHours: number; expressDelayHours: number; expressRatePct: number; abandonedAfterDays: number; agentMaxDiscountPct: number;
 };
 
@@ -38,6 +40,7 @@ export function ShopSettingsForm({ initial }: { initial: S }) {
           <Field label="Nom du pressing"><Input required value={s.shopName} onChange={(e) => set("shopName", e.target.value)} /></Field>
           <Field label="Adresse"><Input value={s.address} onChange={(e) => set("address", e.target.value)} placeholder="ex. Bonamoussadi, Douala" /></Field>
           <Field label="Téléphones"><Input value={s.phones} onChange={(e) => set("phones", e.target.value)} placeholder="6 99 00 00 00 / 6 77 00 00 00" /></Field>
+          <Field label="Site internet" hint="Imprimé sous les téléphones."><Input value={s.website} onChange={(e) => set("website", e.target.value)} placeholder="https://continentalmarket237.com/" /></Field>
           <Field label="Mention de bas de ticket"><Textarea rows={3} value={s.ticketFooter} onChange={(e) => set("ticketFooter", e.target.value)} /></Field>
         </div>
       </Card>
@@ -49,6 +52,18 @@ export function ShopSettingsForm({ initial }: { initial: S }) {
           <NumberField label="Majoration express" unit="%" value={s.expressRatePct} onChange={(v) => set("expressRatePct", v)} />
           <NumberField label="Plafond de remise agent" unit="%" value={s.agentMaxDiscountPct} onChange={(v) => set("agentMaxDiscountPct", v)} hint="Au-delà, seul le gérant peut accorder la remise." />
           <NumberField label="Seuil de souffrance" unit="jours" value={s.abandonedAfterDays} onChange={(v) => set("abandonedAfterDays", v)} hint="Prête et non retirée depuis plus de N jours." />
+        </div>
+      </Card>
+      <Card className="xl:col-span-2">
+        <CardHeader title="Format du papier" description="Format utilisé par défaut pour les tickets, reçus, étiquettes et clôtures de caisse." />
+        <div className="grid gap-3 border-t border-line p-5 sm:grid-cols-3" role="radiogroup" aria-label="Format du papier">
+          {PAPER_FORMATS.map((f) => (
+            <button key={f.value} type="button" role="radio" aria-checked={s.paperFormat === f.value} onClick={() => set("paperFormat", f.value)}
+              className={cn("rounded-lg border p-4 text-left transition", s.paperFormat === f.value ? "border-brand bg-brand-50 ring-3 ring-brand/10" : "border-line-2 hover:bg-subtle")}>
+              <span className={cn("block font-semibold", s.paperFormat === f.value && "text-brand")}>{f.label}</span>
+              <span className="mt-1 block text-[13px] text-ink-3">{f.hint}</span>
+            </button>
+          ))}
         </div>
       </Card>
       <div className="xl:col-span-2 flex justify-end">
