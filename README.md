@@ -60,9 +60,9 @@ mot de passe `DEMO_AGENT_PASSWORD`, défaut `agent123`), une caisse par agent et
 | Autres | 10 000 – 30 000 |
 
 Le loyer est réglé **par trimestre (225 000)** en plus de toutes les autres charges, qui reviennent chaque mois :
-un mois de loyer coûte ≈ 460 000, un mois normal ≈ 235 000. Le **CA encaissé** de chaque mois complet varie entre
-**473 000 et 780 000 FCFA, médiane 625 000** ; les deux derniers mois (dernier mois complet et mois en cours) sont
-les plus faibles. Le bénéfice en découle : ≈ 150 000 – 210 000 les mois de loyer, ≈ 270 000 – 530 000 les autres.
+un mois de loyer coûte ≈ 460 000, un mois normal ≈ 235 000. Le **bénéfice moyen des mois complets est de 440 000 FCFA**
+(≈ 290 000 – 340 000 les mois de loyer, ≈ 390 000 – 650 000 les autres) pour un CA encaissé de ≈ 620 000 – 890 000
+(moyenne ≈ 760 000) ; les deux derniers mois (dernier mois complet et mois en cours) sont les plus faibles.
 Tous les montants sont des multiples de 100 FCFA, le plus souvent de 500.
 `DEMO_RESET=1` efface les données métier avant de régénérer. Au build Vercel (`SEED_DEMO=1`), le jeu est
 régénéré une seule fois quand `DEMO_VERSION` change dans `scripts/seed-demo.ts` : **retirez `SEED_DEMO`

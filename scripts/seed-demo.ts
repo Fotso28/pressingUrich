@@ -7,8 +7,8 @@
  *    électricité 30 000–50 000, autres 10 000–30 000. Le mois en cours n'a pas encore réglé eau,
  *    électricité ni salaires (payés en fin de mois).
  *    Le mois du loyer cumule donc 3 × 75 000 + toutes les autres charges : son bénéfice est nettement plus bas.
- *  - CA encaissé par mois complet entre 473 000 et 780 000 FCFA, médiane 625 000 ; les deux derniers mois
- *    (dernier mois complet et mois en cours, au rythme du mois) sont les plus faibles. Le bénéfice en découle.
+ *  - Bénéfice moyen des mois complets : 440 000 FCFA (CA encaissé ≈ 620 000 – 890 000) ; les deux derniers mois
+ *    (dernier mois complet et mois en cours, au rythme du mois) sont les plus faibles.
  *  - Tous les montants sont des multiples de 100 FCFA, le plus souvent de 500.
  *  - Clients aux noms camerounais ; 70 % sont des habitués qui reviennent régulièrement.
  *  - Deux agents comptoir, une session de caisse par agent et par jour, dépenses, clôtures.
@@ -34,20 +34,21 @@ import { normalizeName, normalizePhone } from "../src/lib/domain/normalize";
 
 const TZ = "Africa/Douala";
 const START = process.env.DEMO_START ?? "2025-11-01";
-const DEMO_VERSION = "4";
+const DEMO_VERSION = "5";
 // Charges fixes mensuelles (FCFA)
 const RENT = 75_000, WATER = 15_000, TV = 5_000;
 const RENT_EVERY = 3; // loyer payé par trimestre, le premier mois du trimestre
 const SALARIES = [75_000, 45_000]; // agent 1, agent 2
-// CA mensuel visé (mois complets) : entre REV_MIN et REV_MAX, médiane REV_MEDIAN.
-const REV_MIN = 473_000, REV_MAX = 780_000, REV_MEDIAN = 625_000;
+// Bénéfice moyen visé sur les mois complets (les mois de loyer gagnent moins, les autres plus).
+const PROFIT_AVG = 440_000;
 /**
- * Profil du CA des mois complets, du plus ancien au plus récent (fêtes de fin d'année fortes, creux de janvier,
- * bonne saison sèche, ralentissement de saison des pluies). Médiane 625 000 ; le dernier mois complet est le plus bas
- * après le mois en cours (REV_CURRENT, au rythme d'un mois entier).
+ * Forme du CA des mois complets, du plus ancien au plus récent, en écart à un niveau de base (fêtes de fin d'année
+ * fortes, creux de janvier, bonne saison sèche, ralentissement de saison des pluies). Le niveau de base est calculé
+ * pour que le bénéfice moyen vaille PROFIT_AVG. Les deux derniers mois (dernier mois complet et mois en cours,
+ * REV_SHAPE_CURRENT au rythme d'un mois entier) sont les plus faibles.
  */
-const REV_PROFILE = [618_000, 762_000, 548_000, 640_000, 690_000, 731_000, 662_000, 596_000, 571_000, 625_000, 498_000];
-const REV_CURRENT = 490_000;
+const REV_SHAPE = [-7_000, 137_000, -77_000, 15_000, 65_000, 106_000, 37_000, -29_000, -54_000, 0, -127_000];
+const REV_SHAPE_CURRENT = -120_000;
 /** Multiple de `step` le plus proche. */
 const roundTo = (v: number, step = 500) => Math.round(v / step) * step;
 /** Montant aléatoire multiple de 500 entre a et b (bornes incluses, multiples de 500). */
@@ -216,14 +217,18 @@ async function main() {
     });
   }
   const rentOf = (mo: (typeof months)[number]) => (months.indexOf(mo) % RENT_EVERY === 0 ? RENT * RENT_EVERY : 0);
-  // CA visé : le profil est aligné sur les mois les plus récents (les plus faibles en dernier).
-  const profile = REV_PROFILE.slice(-full.length);
-  while (profile.length < full.length) profile.unshift(REV_MEDIAN);
-  full.forEach((mo, i) => { mo.target = Math.min(REV_MAX, Math.max(REV_MIN, profile[i])); });
+  const monthCharges = (b: Budget, mo: (typeof months)[number]) => rentOf(mo) + WATER + TV + SALARIES[0] + SALARIES[1] + b.electricity + b.intrants + b.other;
+  // CA visé : la forme est alignée sur les mois les plus récents (les plus faibles en dernier), puis décalée pour que
+  // le bénéfice moyen (CA − toutes les charges du mois) vaille PROFIT_AVG.
+  const shape = REV_SHAPE.slice(-full.length);
+  while (shape.length < full.length) shape.unshift(0);
+  const mean = (xs: number[]) => xs.reduce((a, x) => a + x, 0) / Math.max(1, xs.length);
+  const base = roundTo(PROFIT_AVG + mean(full.map((mo) => monthCharges(budgets.get(mo.key)!, mo))) - mean(shape), 1000);
+  full.forEach((mo, i) => { mo.target = base + shape[i]; });
   for (const mo of months) if (!mo.target) {
     // Mois en cours : objectif proratisé sur les jours ouvrés écoulés.
     const totalOpen = Array.from({ length: mo.days }, (_, i) => i + 1).filter((d) => local(at(mo.y, mo.m, d, 12, 0)).getDay() !== 0).length;
-    mo.target = roundTo((REV_CURRENT * mo.openDays.length) / totalOpen, 1000);
+    mo.target = roundTo(((base + REV_SHAPE_CURRENT) * mo.openDays.length) / totalOpen, 1000);
   }
 
   // Clients : 70 % d'habitués
@@ -528,8 +533,8 @@ async function main() {
   for (const mo of months) console.log(`  ${mo.key}  dépenses ${String(outByMonth.get(mo.key) ?? 0).padStart(8)}  bénéfice ${String((byMonth.get(mo.key) ?? 0) - (outByMonth.get(mo.key) ?? 0)).padStart(8)}`);
   const profits = fullKeys.map((k) => (byMonth.get(k) ?? 0) - (outByMonth.get(k) ?? 0));
   const sorted = [...fullVals].sort((a, b) => a - b);
-  console.log(`  CA des mois complets : min ${sorted[0]} · médiane ${sorted[Math.floor(sorted.length / 2)]} · max ${sorted[sorted.length - 1]} (cible ${REV_MIN}–${REV_MAX}, médiane ${REV_MEDIAN})`);
-  console.log(`  Bénéfice des mois complets : min ${Math.min(...profits)} · max ${Math.max(...profits)}`);
+  console.log(`  CA des mois complets : min ${sorted[0]} · médiane ${sorted[Math.floor(sorted.length / 2)]} · max ${sorted[sorted.length - 1]} · moyenne ${Math.round(mean(fullVals))}`);
+  console.log(`  Bénéfice des mois complets : moyenne ${Math.round(mean(profits))} (cible ${PROFIT_AVG}) · min ${Math.min(...profits)} · max ${Math.max(...profits)}`);
   const odd = [...orders.map((o) => o.total as number), ...pays.map((p) => p.amount as number), ...exps.map((e) => e.amount as number), ...outRows.map((o) => o.amount as number)].filter((v) => v % 100 !== 0).length;
   const by500 = [...pays.map((p) => p.amount as number), ...exps.map((e) => e.amount as number), ...outRows.map((o) => o.amount as number)];
   console.log(`  Montants non multiples de 100 : ${odd} · paiements et dépenses multiples de 500 : ${Math.round((by500.filter((v) => v % 500 === 0).length / by500.length) * 100)} %`);
