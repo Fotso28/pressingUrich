@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { History } from "lucide-react";
 import { pageUser } from "@/server/session";
-import { getCashSessionSummary, getOpenCashSession, listCashiers, listOpenSessions, listSessionsFiltered } from "@/server/queries/cash";
+import { getCashSessionSummary, getOpenCashSession, listCashiers, receivedBetween, listOpenSessions, listSessionsFiltered } from "@/server/queries/cash";
 import { availableMonths, monthBounds } from "@/server/queries/finance";
 import { MonthPicker, ParamSelect } from "@/components/filters/month-picker";
 import { monthLabel } from "@/lib/domain/dates";
@@ -27,12 +27,15 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
   // Un agent ne voit que ses propres caisses.
   const agentId = isAdmin ? (sp.agent || undefined) : user.id;
   const onlyGaps = sp.ecart === "1";
-  const [history, others, cashiers] = await Promise.all([
-    listSessionsFiltered({ from, to, userId: agentId, onlyGaps }),
+  const [history, others, cashiers, monthReceived] = await Promise.all([
+    listSessionsFiltered({ from, to, userId: agentId, onlyGaps, includeOpen: !onlyGaps }),
     isAdmin ? listOpenSessions() : Promise.resolve([]),
     isAdmin ? listCashiers() : Promise.resolve([]),
+    // Encaissé du mois : paiements datés dans le mois, caisses ouvertes comprises — même total que les ventes des rapports.
+    receivedBetween(from, to, agentId),
   ]);
-  const totals = history.reduce((a, s) => ({ received: a.received + s.received, difference: a.difference + s.difference, gaps: a.gaps + (s.difference !== 0 ? 1 : 0) }), { received: 0, difference: 0, gaps: 0 });
+  const totals = history.reduce((a, s) => ({ received: a.received + s.receivedInPeriod, difference: a.difference + s.difference, gaps: a.gaps + (s.difference !== 0 ? 1 : 0) }), { received: 0, difference: 0, gaps: 0 });
+  const openCount = history.filter((s) => s.open).length;
   return (
     <>
       <PageHeader title="Caisse" description={open ? `Ouverte le ${formatDateTime(open.openedAt)}` : "Aucune caisse ouverte"} />
@@ -61,7 +64,7 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
       </div>
 
       <Card className="mt-6">
-        <CardHeader title="Historique des caisses" description={`${history.length} caisse(s) clôturée(s) · ${monthLabel(month)}`} action={<History className="size-4 text-ink-3" />} />
+        <CardHeader title="Historique des caisses" description={`${history.length - openCount} caisse(s) clôturée(s)${openCount ? ` · ${openCount} en cours` : ""} · ${monthLabel(month)}`} action={<History className="size-4 text-ink-3" />} />
         <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-3">
           <MonthPicker months={months} value={month} className="w-full sm:w-auto" />
           {isAdmin && (
@@ -69,16 +72,16 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
               options={[{ value: "", label: "Tous les agents" }, ...cashiers.map((c) => ({ value: c.id, label: c.name }))]} />
           )}
           <ParamSelect param="ecart" value={onlyGaps ? "1" : ""} label="Écart" className="min-w-0 flex-1 sm:flex-none"
-            options={[{ value: "", label: "Toutes les clôtures" }, { value: "1", label: "Avec écart seulement" }]} />
+            options={[{ value: "", label: "Toutes les caisses" }, { value: "1", label: "Avec écart seulement" }]} />
         </div>
         {history.length > 0 && (
           <div className="grid grid-cols-3 divide-x divide-line border-t border-line text-center">
-            <div className="px-3 py-3"><p className="text-[12px] text-ink-3">Encaissé</p><Money value={totals.received} strong /></div>
+            <div className="px-3 py-3"><p className="text-[12px] text-ink-3">Encaissé</p><Money value={onlyGaps ? totals.received : monthReceived} strong /></div>
             <div className="px-3 py-3"><p className="text-[12px] text-ink-3">Avec écart</p><p className="font-semibold tnum">{totals.gaps}</p></div>
             <div className="px-3 py-3"><p className="text-[12px] text-ink-3">Écart cumulé</p><Money value={totals.difference} strong className={totals.difference ? "text-danger" : "text-success"} /></div>
           </div>
         )}
-        {history.length === 0 ? <EmptyState title="Aucune caisse clôturée">Changez de mois ou de filtre.</EmptyState> : (
+        {history.length === 0 ? <EmptyState title="Aucune caisse">Changez de mois ou de filtre.</EmptyState> : (
           <ul className="divide-y divide-line border-t border-line">
             {history.map((s) => (
               <li key={s.id}>
@@ -87,10 +90,17 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
                     <p className="truncate font-medium">{s.userName}</p>
                     <p className="text-[13px] text-ink-3 tnum">{formatDateTime(s.openedAt)} · encaissé <Money value={s.received} unit={false} /></p>
                   </div>
+                  {s.open ? (
+                    <div className="shrink-0 text-right">
+                      <Money value={s.received} strong />
+                      <p className="text-[12.5px] text-brand">En cours</p>
+                    </div>
+                  ) : (
                   <div className="shrink-0 text-right">
                     <Money value={s.counted} strong />
                     <p className={cn("text-[12.5px] tnum", s.difference === 0 ? "text-success" : "text-danger")}>{s.difference === 0 ? "Sans écart" : <>Écart <Money value={s.difference} unit={false} /></>}</p>
                   </div>
+                  )}
                 </Link>
               </li>
             ))}

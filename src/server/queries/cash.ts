@@ -45,9 +45,14 @@ export async function listClosedSessions(limit = 60, onlyGaps = false) {
   return onlyGaps ? out.filter((x) => x.counts.some((k) => k.difference !== 0)).slice(0, limit) : out;
 }
 
-/** Caisses clôturées filtrées : période (sur la date d'ouverture), agent, uniquement celles avec écart. */
-export async function listSessionsFiltered(f: { from: Date; to: Date; userId?: string; onlyGaps?: boolean }) {
-  const conds = [eq(cashSessions.status, "FERMEE"), gte(cashSessions.openedAt, f.from), lt(cashSessions.openedAt, f.to)];
+/**
+ * Caisses d'une période (sur la date d'ouverture), d'un agent, éventuellement celles avec écart seulement.
+ * `includeOpen` ajoute les caisses encore ouvertes (journée en cours).
+ * `receivedInPeriod` ne compte que les paiements datés dans la période : c'est ce total qui se compare aux ventes
+ * des rapports (une caisse laissée ouverte la nuit peut encaisser sur deux mois).
+ */
+export async function listSessionsFiltered(f: { from: Date; to: Date; userId?: string; onlyGaps?: boolean; includeOpen?: boolean }) {
+  const conds = [f.includeOpen ? inArray(cashSessions.status, ["FERMEE", "OUVERTE"]) : eq(cashSessions.status, "FERMEE"), gte(cashSessions.openedAt, f.from), lt(cashSessions.openedAt, f.to)];
   if (f.userId) conds.push(eq(cashSessions.userId, f.userId));
   const sessions = await db.select({ s: cashSessions, userName: user.name }).from(cashSessions)
     .leftJoin(user, eq(user.id, cashSessions.userId)).where(and(...conds)).orderBy(desc(cashSessions.openedAt));
@@ -55,19 +60,31 @@ export async function listSessionsFiltered(f: { from: Date; to: Date; userId?: s
   const ids = sessions.map((x) => x.s.id);
   const [counts, received] = await Promise.all([
     db.select().from(cashSessionCounts).where(inArray(cashSessionCounts.cashSessionId, ids)),
-    db.select({ id: payments.cashSessionId, total: sql<number>`coalesce(sum(${payments.amount}),0)::int` }).from(payments)
-      .where(and(inArray(payments.cashSessionId, ids), isNull(payments.voidedAt))).groupBy(payments.cashSessionId),
+    db.select({
+      id: payments.cashSessionId, total: sql<number>`coalesce(sum(${payments.amount}),0)::int`,
+      inPeriod: sql<number>`coalesce(sum(${payments.amount}) filter (where ${payments.createdAt} >= ${f.from} and ${payments.createdAt} < ${f.to}),0)::int`,
+    }).from(payments).where(and(inArray(payments.cashSessionId, ids), isNull(payments.voidedAt))).groupBy(payments.cashSessionId),
   ]);
   const out = sessions.map(({ s, userName }) => {
     const c = counts.filter((k) => k.cashSessionId === s.id);
+    const r = received.find((x) => x.id === s.id);
     return {
-      id: s.id, userName, openedAt: s.openedAt, closedAt: s.closedAt, comment: s.closingComment,
-      received: Number(received.find((r) => r.id === s.id)?.total ?? 0),
+      id: s.id, userName, open: s.status === "OUVERTE", openedAt: s.openedAt, closedAt: s.closedAt, comment: s.closingComment,
+      received: Number(r?.total ?? 0), receivedInPeriod: Number(r?.inPeriod ?? 0),
       expected: c.reduce((a, k) => a + k.expected, 0), counted: c.reduce((a, k) => a + k.counted, 0),
       difference: c.reduce((a, k) => a + k.difference, 0),
     };
   });
   return f.onlyGaps ? out.filter((x) => x.difference !== 0) : out;
+}
+
+/** Total encaissé (paiements non annulés) entre deux dates, toutes caisses ou celles d'un agent : même base que les ventes des rapports. */
+export async function receivedBetween(from: Date, to: Date, userId?: string) {
+  const conds = [isNull(payments.voidedAt), gte(payments.createdAt, from), lt(payments.createdAt, to)];
+  if (userId) conds.push(eq(cashSessions.userId, userId));
+  const [r] = await db.select({ total: sql<number>`coalesce(sum(${payments.amount}),0)::int` }).from(payments)
+    .innerJoin(cashSessions, eq(cashSessions.id, payments.cashSessionId)).where(and(...conds));
+  return Number(r.total);
 }
 
 export async function listCashiers() {

@@ -34,7 +34,7 @@ import { normalizeName, normalizePhone } from "../src/lib/domain/normalize";
 
 const TZ = "Africa/Douala";
 const START = process.env.DEMO_START ?? "2025-11-01";
-const DEMO_VERSION = "5";
+const DEMO_VERSION = "6";
 // Charges fixes mensuelles (FCFA)
 const RENT = 75_000, WATER = 15_000, TV = 5_000;
 const RENT_EVERY = 3; // loyer payé par trimestre, le premier mois du trimestre
@@ -272,7 +272,7 @@ async function main() {
     let ss = sessions.get(k);
     if (!ss) {
       const z = local(when);
-      const openedAt = at(z.getFullYear(), z.getMonth(), z.getDate(), 7, int(25, 50));
+      const openedAt = at(z.getFullYear(), z.getMonth(), z.getDate(), 7, int(10, 25)); // avant le premier client (7 h 30)
       const closedAt = at(z.getFullYear(), z.getMonth(), z.getDate(), 19, int(35, 55));
       ss = { id: randomUUID(), userId, day: dayKey(when), openedAt, closedAt: dayKey(when) === dayKey(now) ? null : closedAt, float: pick([5000, 10000, 10000, 15000]) };
       sessions.set(k, ss);
@@ -302,7 +302,7 @@ async function main() {
       const dayOrders: { when: Date }[] = [];
       // Au moins 3 dépôts par jour ouvré : un comptoir n'est jamais vide.
       while (dayTotal < dayBudget || dayOrders.length < 3) {
-        const when = at(mo.y, mo.m, d, int(7, 18), int(0, 59));
+        const when = new Date(at(mo.y, mo.m, d, 7, 30).getTime() + Math.floor(rnd() * 660) * 60_000); // 7 h 30 – 18 h 30
         if (when > now) break;
         // Choix du client : habitués pondérés par fréquence, occasionnels ~6 % des dépôts.
         let c: Cust | undefined;
