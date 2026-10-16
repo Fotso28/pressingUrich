@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Ticket } from "@/components/ticket";
-import { fitPageToContent, paperOf, ticketCss } from "@/components/print/ticket-css";
+import { paperOf, ticketCss } from "@/components/print/ticket-css";
 import type { OrderDetail } from "@/server/queries/orders";
 import type { Settings } from "@/server/queries/settings";
 import type { OfflineOrder, Snapshot } from "@/lib/offline/types";
@@ -26,13 +26,11 @@ export function useOfflinePrint(settings: Snapshot["settings"]) {
   useEffect(() => {
     if (!job) return;
     const t = setTimeout(() => {
-      const el = document.querySelector<HTMLElement>(".cp-print");
-      if (el) fitPageToContent(paperOf(settings.paperFormat), el);
       window.print();
       setJob(null);
     }, 150);
     return () => clearTimeout(t);
-  }, [job, settings.paperFormat]);
+  }, [job]);
   const node = job && typeof document !== "undefined"
     ? createPortal(
         <div className="cp-print">

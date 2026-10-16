@@ -86,9 +86,9 @@ L'application installée (PWA) s'ouvre et reste utilisable au comptoir sans conn
 
 ## Impression
 
-Format par défaut : **rouleau 80 mm** des imprimantes de mini-factures (thermiques), longueur ajustée
-au contenu. Rouleau 58 mm et ISO B7 (88 × 125 mm) au choix dans Paramètres › Pressing, avec le site
-internet imprimé sur le ticket.
+Le ticket occupe toute la largeur du papier choisi à l'impression (rouleau 80 mm des imprimantes de
+mini-factures par défaut, 58 mm, B7, A4…) et continue sur plusieurs pages si besoin. Format de référence et site
+internet dans Paramètres › Pressing.
 
 ## Déploiement (Vercel + Neon)
 

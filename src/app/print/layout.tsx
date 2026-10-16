@@ -1,6 +1,5 @@
 import { pageUser } from "@/server/session";
 import { PRINT_SCREEN_CSS, paperOf, ticketCss } from "@/components/print/ticket-css";
-import { FitPage } from "@/components/print/fit-page";
 import { getSettings } from "@/server/queries/settings";
 
 export default async function PrintLayout({ children }: { children: React.ReactNode }) {
@@ -9,7 +8,6 @@ export default async function PrintLayout({ children }: { children: React.ReactN
   return (
     <>
       <style>{ticketCss(format) + PRINT_SCREEN_CSS}</style>
-      <FitPage format={format} />
       {children}
     </>
   );

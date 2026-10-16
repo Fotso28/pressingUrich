@@ -55,7 +55,7 @@ export function ShopSettingsForm({ initial }: { initial: S }) {
         </div>
       </Card>
       <Card className="xl:col-span-2">
-        <CardHeader title="Format du papier" description="Format utilisé par défaut pour les tickets, reçus, étiquettes et clôtures de caisse." />
+        <CardHeader title="Format du papier" description="Format de référence (aperçu et proportions). À l'impression, le ticket s'adapte à toute la largeur du papier choisi et continue sur plusieurs pages si besoin." />
         <div className="grid grid-cols-1 gap-3 border-t border-line p-5 sm:grid-cols-3" role="radiogroup" aria-label="Format du papier">
           {PAPER_FORMATS.map((f) => (
             <button key={f.value} type="button" role="radio" aria-checked={s.paperFormat === f.value} onClick={() => set("paperFormat", f.value)}
