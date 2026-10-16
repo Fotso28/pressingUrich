@@ -20,11 +20,16 @@ describe("computeOrderTotals (RG-04)", () => {
   it("remise en montant", () => {
     expect(computeOrderTotals(lines, { isExpress: false, expressRatePct: 50, discount: { type: "MONTANT", value: 500 } }).total).toBe(6500);
   });
-  it("remise en % arrondie et pourcentage calculé", () => {
-    const t = computeOrderTotals([{ unitPrice: 333, quantity: 1 }], { isExpress: false, expressRatePct: 0, discount: { type: "POURCENT", value: 10 } });
-    expect(t.discountAmount).toBe(33);
-    expect(t.total).toBe(300);
-    expect(t.discountPct).toBeCloseTo(9.9, 1);
+  it("remise en % arrondie à la centaine inférieure et pourcentage calculé", () => {
+    const t = computeOrderTotals([{ unitPrice: 3300, quantity: 1 }], { isExpress: false, expressRatePct: 0, discount: { type: "POURCENT", value: 10 } });
+    expect(t.discountAmount).toBe(300);
+    expect(t.total).toBe(3000);
+    expect(t.discountPct).toBeCloseTo(9.09, 1);
+  });
+  it("majoration express arrondie à la centaine supérieure", () => {
+    const t = computeOrderTotals([{ unitPrice: 300, quantity: 1 }], { isExpress: true, expressRatePct: 50, discount: null });
+    expect(t.expressAmount).toBe(200);
+    expect(t.total).toBe(500);
   });
   it("remise plafonnée au montant", () => {
     expect(computeOrderTotals(lines, { isExpress: false, expressRatePct: 0, discount: { type: "MONTANT", value: 99999 } }).total).toBe(0);

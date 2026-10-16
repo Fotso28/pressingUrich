@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Wallet, X, ShoppingBasket, Users, Home, Zap, Truck, Wrench, Landmark, MoreHorizontal } from "lucide-react";
+import { Plus, Wallet, X, ShoppingBasket, Users, Home, Zap, Droplets, Tv, Truck, Wrench, Landmark, MoreHorizontal } from "lucide-react";
 import { addOutflow, voidOutflow } from "@/server/actions/outflows";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, EmptyState } from "@/components/ui/card";
@@ -12,42 +12,94 @@ import { AmountInput, Field, Input, Textarea } from "@/components/ui/field";
 import { SaveButton } from "@/components/save-button";
 import { Money } from "@/components/money";
 import { ReasonDialog } from "../commandes/[id]/order-actions";
-import { OUTFLOW_CATEGORIES, OUTFLOW_CATEGORY_LABEL, OUTFLOW_METHODS, OUTFLOW_METHOD_LABEL, type OutflowCategory, type OutflowMethod } from "@/lib/domain/cash";
-import { formatDateTime, fromDateTimeLocal, toDateTimeLocal } from "@/lib/domain/dates";
+import { ALL_OUTFLOW_CATEGORIES, OUTFLOW_CATEGORIES, OUTFLOW_CATEGORY_LABEL, OUTFLOW_METHODS, OUTFLOW_METHOD_LABEL, type OutflowCategory, type OutflowMethod } from "@/lib/domain/cash";
+import { formatDate, formatDateTime, fromDateTimeLocal, toDateTimeLocal } from "@/lib/domain/dates";
+import { formatAmount } from "@/lib/domain/money";
 import { useAction } from "@/lib/use-action";
+import type { SalaryStaff } from "@/server/queries/finance";
 import { cn } from "@/lib/cn";
 
 export const CATEGORY_ICON: Record<OutflowCategory, React.ComponentType<{ className?: string }>> = {
-  INTRANTS: ShoppingBasket, SALAIRES: Users, LOYER: Home, ENERGIE_EAU: Zap, TRANSPORT: Truck, ENTRETIEN: Wrench, TAXES: Landmark, AUTRE: MoreHorizontal,
+  INTRANTS: ShoppingBasket, SALAIRES: Users, LOYER: Home, ELECTRICITE: Zap, EAU: Droplets, ABONNEMENTS: Tv, ENERGIE_EAU: Zap, TRANSPORT: Truck, ENTRETIEN: Wrench, TAXES: Landmark, AUTRE: MoreHorizontal,
 };
 
 const PRESETS: Partial<Record<OutflowCategory, string[]>> = {
   INTRANTS: ["Lessive (carton)", "Eau de Javel (bidon 20 L)", "Détachant", "Amidon", "Cintres", "Housses et sachets", "Assouplissant"],
   LOYER: ["Loyer du local"],
-  ENERGIE_EAU: ["Facture ENEO (électricité)", "Facture CAMWATER (eau)", "Gaz", "Carburant groupe électrogène"],
+  ELECTRICITE: ["Facture ENEO (électricité)", "Carburant groupe électrogène"],
+  EAU: ["Facture CAMWATER (eau)"],
+  ABONNEMENTS: ["Abonnement TV Canal+", "Forfait internet"],
+  AUTRE: ["Fournitures de bureau", "Gaz", "Divers"],
   ENTRETIEN: ["Réparation machine à laver", "Réparation fer à repasser", "Entretien séchoir"],
   TAXES: ["Impôt libératoire", "Taxe communale", "Patente"],
   TRANSPORT: ["Transport livraison", "Achat au marché (transport)"],
 };
 
-export function OutflowActions({ suggestions, defaultPeriod }: { suggestions: string[]; defaultPeriod: string }) {
+export function OutflowActions({ staff, defaultPeriod }: { staff: SalaryStaff[]; defaultPeriod: string }) {
   const [open, setOpen] = useState<null | "salary" | "out">(null);
   const router = useRouter();
   return (
     <>
       <SaveButton variant="secondary" onClick={() => setOpen("salary")}><Users />Payer un salaire</SaveButton>
       <SaveButton onClick={() => setOpen("out")}><Plus />Nouvelle sortie</SaveButton>
-      {open && <OutflowDialog salary={open === "salary"} suggestions={suggestions} defaultPeriod={defaultPeriod} onClose={() => setOpen(null)} onDone={() => { setOpen(null); router.refresh(); }} />}
+      {open && <OutflowDialog salary={open === "salary"} staff={staff} defaultPeriod={defaultPeriod} onClose={() => setOpen(null)} onDone={() => { setOpen(null); router.refresh(); }} />}
     </>
   );
 }
 
-function OutflowDialog({ salary, suggestions, defaultPeriod, onClose, onDone }: { salary: boolean; suggestions: string[]; defaultPeriod: string; onClose: () => void; onDone: () => void }) {
+const ROLE_LABEL: Record<string, string> = { ADMIN: "Gérant", AGENT: "Agent comptoir" };
+
+/** Salaires du mois : chaque employé (compte utilisateur), payé ou à payer. */
+export function SalaryBoard({ staff, paid, period, periodLabel }: {
+  staff: SalaryStaff[]; period: string; periodLabel: string;
+  paid: { id: string; userId: string | null; name: string; amount: number; at: string }[];
+}) {
+  const router = useRouter();
+  const [payFor, setPayFor] = useState<string | null>(null);
+  // Les agents apparaissent toujours ; les autres comptes seulement s'ils ont été payés ce mois-ci.
+  const rows = staff.filter((u) => u.role === "AGENT" || paid.some((p) => p.userId === u.id));
+  const orphans = paid.filter((p) => !p.userId || !staff.some((u) => u.id === p.userId));
+  return (
+    <Card>
+      <CardHeader title="Salaires du mois" description={`Employés et paiements · ${periodLabel}`} />
+      {rows.length + orphans.length === 0 ? <EmptyState title="Aucun employé">Créez les comptes des employés dans Paramètres › Utilisateurs.</EmptyState> : (
+        <ul className="divide-y divide-line border-t border-line">
+          {rows.map((u) => {
+            const mine = paid.filter((p) => p.userId === u.id);
+            const total = mine.reduce((a, p) => a + p.amount, 0);
+            return (
+              <li key={u.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{u.name}</p>
+                  <p className="text-[13px] text-ink-3 tnum">{ROLE_LABEL[u.role] ?? u.role}{mine.length ? ` · payé le ${formatDate(mine[0].at)}` : u.lastAmount ? ` · habituellement ${formatAmount(u.lastAmount)} FCFA` : " · à payer"}</p>
+                </div>
+                {mine.length ? <Money value={total} strong /> : (
+                  <Button size="sm" variant="secondary" onClick={() => setPayFor(u.id)}><Wallet />Payer</Button>
+                )}
+              </li>
+            );
+          })}
+          {orphans.map((p) => (
+            <li key={p.id} className="flex items-center justify-between gap-3 px-5 py-3">
+              <div><p className="font-medium">{p.name}</p><p className="text-[13px] text-ink-3">Payé le {formatDate(p.at)}</p></div>
+              <Money value={p.amount} strong />
+            </li>
+          ))}
+        </ul>
+      )}
+      {payFor && <OutflowDialog salary staff={staff} defaultPeriod={period} defaultUserId={payFor} onClose={() => setPayFor(null)} onDone={() => { setPayFor(null); router.refresh(); }} />}
+    </Card>
+  );
+}
+
+function OutflowDialog({ salary, staff, defaultPeriod, defaultUserId, onClose, onDone }: { salary: boolean; staff: SalaryStaff[]; defaultPeriod: string; defaultUserId?: string; onClose: () => void; onDone: () => void }) {
+  const initialUser = staff.find((u) => u.id === defaultUserId);
   const [category, setCategory] = useState<OutflowCategory>(salary ? "SALAIRES" : "INTRANTS");
   const [label, setLabel] = useState(salary ? "Salaire" : "");
-  const [amount, setAmount] = useState<number | null>(null);
+  const [amount, setAmount] = useState<number | null>(initialUser?.lastAmount ?? null);
   const [method, setMethod] = useState<OutflowMethod>(salary ? "MTN_MOMO" : "ESPECES");
   const [beneficiary, setBeneficiary] = useState("");
+  const [employeeId, setEmployeeId] = useState(initialUser?.id ?? "");
   const [period, setPeriod] = useState(defaultPeriod);
   const [when, setWhen] = useState(() => toDateTimeLocal(new Date()));
   const [notes, setNotes] = useState("");
@@ -59,12 +111,13 @@ function OutflowDialog({ salary, suggestions, defaultPeriod, onClose, onDone }: 
         <form className="space-y-5" onSubmit={(e) => {
           e.preventDefault();
           exec(() => addOutflow({
-            occurredAt: fromDateTimeLocal(when).toISOString(), category, label: isSalary ? `Salaire ${beneficiary}`.trim() : label,
-            amount: amount ?? 0, method, beneficiary, salaryPeriod: isSalary ? period : null, notes,
+            occurredAt: fromDateTimeLocal(when).toISOString(), category, label: isSalary ? "Salaire" : label,
+            amount: amount ?? 0, method, beneficiary: isSalary ? undefined : beneficiary, beneficiaryUserId: isSalary ? employeeId : null,
+            salaryPeriod: isSalary ? period : null, notes,
           }), { success: isSalary ? "Salaire enregistré." : "Sortie enregistrée.", onSuccess: onDone });
         }}>
           {!salary && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
               {OUTFLOW_CATEGORIES.map((c) => {
                 const Icon = CATEGORY_ICON[c];
                 return (
@@ -79,9 +132,15 @@ function OutflowDialog({ salary, suggestions, defaultPeriod, onClose, onDone }: 
           )}
           {isSalary ? (
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Employé" hint="Repasseur, laveur, agent… (compte ou non)">
-                <Input autoFocus required list="employees" value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} placeholder="Nom de l'employé" />
-                <datalist id="employees">{suggestions.map((s) => <option key={s} value={s} />)}</datalist>
+              <Field label="Employé" htmlFor="salary-employee" hint="Comptes actifs de Paramètres › Utilisateurs">
+                <select id="salary-employee" autoFocus required value={employeeId} onChange={(e) => {
+                  const u = staff.find((x) => x.id === e.target.value);
+                  setEmployeeId(e.target.value);
+                  if (u?.lastAmount && !amount) setAmount(u.lastAmount);
+                }} className="h-11 w-full rounded-md border border-line-2 bg-surface px-3 text-[15px] text-ink outline-none focus:border-brand focus:ring-3 focus:ring-brand/12">
+                  <option value="" disabled>Choisir un employé…</option>
+                  {staff.map((u) => <option key={u.id} value={u.id}>{u.name} — {ROLE_LABEL[u.role] ?? u.role}</option>)}
+                </select>
               </Field>
               <Field label="Mois de salaire"><Input type="month" required value={period} onChange={(e) => setPeriod(e.target.value)} /></Field>
             </div>
@@ -109,7 +168,7 @@ function OutflowDialog({ salary, suggestions, defaultPeriod, onClose, onDone }: 
           <Field label="Notes (facultatif)"><Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
-            <SaveButton type="submit" loading={pending} disabled={!amount || (isSalary ? beneficiary.trim().length < 2 : label.trim().length < 2)}>
+            <SaveButton type="submit" loading={pending} disabled={!amount || (isSalary ? !employeeId : label.trim().length < 2)}>
               <Wallet />Enregistrer <Money value={amount ?? 0} unit={false} />
             </SaveButton>
           </DialogFooter>
@@ -129,7 +188,7 @@ export function MoneyOutTable({ rows }: { rows: Row[] }) {
   const [filter, setFilter] = useState<OutflowCategory | "ALL">("ALL");
   const [voidId, setVoidId] = useState<string | null>(null);
   const { exec } = useAction();
-  const present = OUTFLOW_CATEGORIES.filter((c) => rows.some((r) => r.category === c));
+  const present = ALL_OUTFLOW_CATEGORIES.filter((c) => rows.some((r) => r.category === c));
   const shown = rows.filter((r) => filter === "ALL" || r.category === filter);
   return (
     <Card>

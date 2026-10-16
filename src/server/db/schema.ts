@@ -10,7 +10,7 @@ export const paymentMethodEnum = pgEnum("payment_method",
   ["ESPECES", "MTN_MOMO", "ORANGE_MONEY"]);
 export const cashStatusEnum = pgEnum("cash_status", ["OUVERTE", "FERMEE"]);
 export const outflowCategoryEnum = pgEnum("outflow_category",
-  ["INTRANTS", "SALAIRES", "LOYER", "ENERGIE_EAU", "TRANSPORT", "ENTRETIEN", "TAXES", "AUTRE"]);
+  ["INTRANTS", "SALAIRES", "LOYER", "ENERGIE_EAU", "TRANSPORT", "ENTRETIEN", "TAXES", "AUTRE", "ELECTRICITE", "EAU", "ABONNEMENTS"]);
 export const outflowMethodEnum = pgEnum("outflow_method", ["ESPECES", "MTN_MOMO", "ORANGE_MONEY", "BANQUE"]);
 export const discountTypeEnum = pgEnum("discount_type", ["MONTANT", "POURCENT"]);
 
@@ -266,7 +266,8 @@ export const outflows = pgTable("outflows", {
   label: text("label").notNull(),
   amount: integer("amount").notNull(), // FCFA
   method: outflowMethodEnum("method").notNull(),
-  beneficiary: text("beneficiary"), // fournisseur ou employé
+  beneficiary: text("beneficiary"), // fournisseur, ou nom de l'employé au moment du paiement
+  beneficiaryUserId: text("beneficiary_user_id").references(() => user.id), // employé payé (salaire)
   salaryPeriod: text("salary_period"), // « 2026-10 » pour un salaire
   notes: text("notes"),
   createdBy: text("created_by").notNull(),
@@ -277,7 +278,15 @@ export const outflows = pgTable("outflows", {
 }, (t) => [
   index("outflows_date_idx").on(t.occurredAt),
   index("outflows_category_idx").on(t.category),
+  index("outflows_beneficiary_user_idx").on(t.beneficiaryUserId),
 ]);
+
+/** Paires clé/valeur techniques (ex. version du jeu de démonstration). */
+export const appMeta = pgTable("app_meta", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export type OutflowCategory = (typeof outflowCategoryEnum.enumValues)[number];
 export type OutflowMethod = (typeof outflowMethodEnum.enumValues)[number];

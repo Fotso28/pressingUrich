@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { outflows } from "../db/schema";
+import { outflows, user as users } from "../db/schema";
 import { requireRole } from "../session";
 import { fail, run } from "../action-utils";
 import { optText, positiveAmount, reasonSchema } from "../validation";
@@ -17,6 +17,7 @@ const schema = z.object({
   amount: positiveAmount,
   method: z.enum(OUTFLOW_METHODS as [string, ...string[]], { message: "Mode de paiement invalide." }),
   beneficiary: optText,
+  beneficiaryUserId: z.string().min(1).nullable().optional(),
   salaryPeriod: z.string().regex(/^\d{4}-\d{2}$/, "Mois de salaire invalide.").nullable().optional(),
   notes: optText,
 });
@@ -26,14 +27,23 @@ export async function addOutflow(raw: z.input<typeof schema>) {
   return run(async () => {
     const user = await requireRole("ADMIN");
     const input = schema.parse(raw);
+    let beneficiary = input.beneficiary;
+    let beneficiaryUserId: string | null = null;
     if (input.category === "SALAIRES") {
-      if (!input.beneficiary) fail("Indiquez l'employé payé.");
+      if (!input.beneficiaryUserId) fail("Choisissez l'employé payé.");
       if (!input.salaryPeriod) fail("Indiquez le mois de salaire.");
+      const [employee] = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, input.beneficiaryUserId!)).limit(1);
+      if (!employee) fail("Employé introuvable.");
+      beneficiary = employee.name;
+      beneficiaryUserId = employee.id;
     }
     const when = new Date(input.occurredAt);
     if (when.getTime() > Date.now() + 86_400_000) fail("La date ne peut pas être dans le futur.");
     await db.insert(outflows).values({
       ...input,
+      beneficiary,
+      beneficiaryUserId,
+      label: input.category === "SALAIRES" ? `Salaire ${beneficiary}` : input.label,
       category: input.category as (typeof outflows.$inferInsert)["category"],
       method: input.method as (typeof outflows.$inferInsert)["method"],
       salaryPeriod: input.category === "SALAIRES" ? input.salaryPeriod ?? null : null,

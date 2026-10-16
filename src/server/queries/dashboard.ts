@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db";
-import { customers, orders, payments } from "../db/schema";
+import { customers, orders, payments, user } from "../db/schema";
 import { periodStart, TZ } from "@/lib/domain/dates";
 import { METHODS, type Method } from "@/lib/domain/cash";
 import { getSettings } from "./settings";
@@ -82,3 +82,24 @@ export async function todaysOrders(limit = 10) {
 }
 
 export { METHODS };
+
+export type DayPayment = {
+  id: string; at: Date; amount: number; method: Method; reference: string | null; voided: boolean; voidReason: string | null;
+  orderId: string; orderNumber: number; customer: string; agent: string | null;
+};
+
+/** Encaissements d'une journée (fuseau de Douala), éventuellement limités à un agent. */
+export async function paymentsOfDay(from: Date, to: Date, userId?: string): Promise<DayPayment[]> {
+  const conds = [gte(payments.createdAt, from), lt(payments.createdAt, to)];
+  if (userId) conds.push(eq(payments.createdBy, userId));
+  const rows = await db.select({
+    id: payments.id, at: payments.createdAt, amount: payments.amount, method: payments.method, reference: payments.reference,
+    voidedAt: payments.voidedAt, voidReason: payments.voidReason, orderId: orders.id, orderNumber: orders.number,
+    customer: customers.fullName, agent: user.name,
+  }).from(payments)
+    .innerJoin(orders, eq(orders.id, payments.orderId))
+    .innerJoin(customers, eq(customers.id, orders.customerId))
+    .leftJoin(user, eq(user.id, payments.createdBy))
+    .where(and(...conds)).orderBy(desc(payments.createdAt));
+  return rows.map(({ voidedAt, ...r }) => ({ ...r, method: r.method as Method, voided: !!voidedAt }));
+}

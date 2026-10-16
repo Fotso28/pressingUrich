@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  Home, PackagePlus, ClipboardList, Users, Wallet, BarChart3, Settings2, LogOut, Plus, ReceiptText,
+  Home, PackagePlus, ClipboardList, Users, Wallet, BarChart3, Settings2, LogOut, Plus, ReceiptText, Menu, X, Banknote,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { authClient } from "@/lib/auth-client";
@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
   { href: "/commandes", label: "Commandes", icon: ClipboardList },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/caisse", label: "Caisse", icon: Wallet },
+  { href: "/encaissements", label: "Encaissements", icon: Banknote },
   { href: "/depenses", label: "Dépenses", icon: ReceiptText, admin: true },
   { href: "/rapports", label: "Rapports", icon: BarChart3, admin: true },
   { href: "/parametres/pressing", label: "Paramètres", icon: Settings2, admin: true, match: (p) => p.startsWith("/parametres") },
@@ -45,6 +46,16 @@ function ShellInner({ user, shopName, children }: { user: ShellUser; shopName: s
   const router = useRouter();
   const online = useOnline();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Ferme le menu mobile à chaque changement de page.
+  const [menuPath, setMenuPath] = useState(path);
+  if (menuPath !== path) { setMenuPath(path); setMenuOpen(false); }
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenuOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
   const items = NAV.filter((n) => !n.admin || user.role === "ADMIN");
 
   async function logout() {
@@ -114,14 +125,14 @@ function ShellInner({ user, shopName, children }: { user: ShellUser; shopName: s
       <main className="mx-auto max-w-[1400px] px-4 pb-28 pt-6 sm:px-6 lg:pb-12 lg:pt-8">{children}</main>
 
       {/* Bouton flottant + barre inférieure (téléphone) */}
-      {!path.startsWith("/depot") && (
+      {!path.startsWith("/depot") && !menuOpen && (
         <Link href="/depot/nouveau" className="no-print fixed bottom-[84px] right-4 z-30 flex h-14 items-center gap-2 rounded-full bg-brand pl-4 pr-5 font-medium text-white shadow-pop lg:hidden">
           <Plus className="size-5" /> Dépôt
         </Link>
       )}
-      <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
+      <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
         {MOBILE.map((item) => {
-          const active = isActive(item, path);
+          const active = !menuOpen && isActive(item, path);
           const Icon = item.icon;
           return (
             <Link key={item.href} href={item.href} className={cn("flex h-16 flex-col items-center justify-center gap-1 text-[11.5px] font-medium", active ? "text-brand" : "text-ink-3")}>
@@ -130,7 +141,47 @@ function ShellInner({ user, shopName, children }: { user: ShellUser; shopName: s
             </Link>
           );
         })}
+        <button type="button" onClick={() => setMenuOpen((o) => !o)} aria-expanded={menuOpen} aria-controls="mobile-menu"
+          className={cn("flex h-16 flex-col items-center justify-center gap-1 text-[11.5px] font-medium", menuOpen || !MOBILE.some((i) => isActive(i, path)) ? "text-brand" : "text-ink-3")}>
+          {menuOpen ? <X className="size-[22px]" /> : <Menu className="size-[22px]" />}
+          Menu
+        </button>
       </nav>
+
+      {/* Menu complet (téléphone) */}
+      {menuOpen && (
+        <div className="no-print fixed inset-0 z-20 lg:hidden">
+          <button type="button" aria-label="Fermer le menu" className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]" onClick={() => setMenuOpen(false)} />
+          <div id="mobile-menu" role="dialog" aria-modal="true" aria-label="Menu"
+            className="absolute inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] max-h-[75dvh] overflow-y-auto rounded-t-2xl border-t border-line bg-surface p-3 shadow-pop">
+            <div className="flex items-center gap-3 px-2 pb-3 pt-1">
+              <span className="grid size-10 place-items-center rounded-full bg-brand-50 text-[15px] font-semibold text-brand">{user.name.slice(0, 1).toUpperCase()}</span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium">{user.name}</p>
+                <p className="text-[13px] text-ink-3">{user.role === "ADMIN" ? "Gérant" : "Agent comptoir"} · {online ? "En ligne" : "Hors ligne"}</p>
+              </div>
+            </div>
+            <nav className="grid grid-cols-2 gap-2 border-t border-line pt-3">
+              {items.map((item) => {
+                const active = isActive(item, path);
+                const Icon = item.icon;
+                return (
+                  <Link key={item.href} href={item.href} onClick={() => setMenuOpen(false)}
+                    className={cn("flex h-14 items-center gap-3 rounded-lg border px-3 text-[15px] font-medium",
+                      active ? "border-brand/30 bg-brand-50 text-brand" : "border-line text-ink-2 active:bg-subtle")}>
+                    <Icon className={cn("size-5", active ? "text-brand" : "text-ink-3")} />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+            <button type="button" onClick={logout} disabled={loggingOut}
+              className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-lg border border-line text-[15px] font-medium text-danger active:bg-danger-50">
+              <LogOut className="size-[18px]" /> Se déconnecter
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -20,17 +20,25 @@ export function computeCashExpected(openingFloat: number, payments: CashLine[], 
   });
 }
 
-export type OutflowCategory = "INTRANTS" | "SALAIRES" | "LOYER" | "ENERGIE_EAU" | "TRANSPORT" | "ENTRETIEN" | "TAXES" | "AUTRE";
-export const OUTFLOW_CATEGORIES: OutflowCategory[] = ["INTRANTS", "SALAIRES", "LOYER", "ENERGIE_EAU", "TRANSPORT", "ENTRETIEN", "TAXES", "AUTRE"];
+export type OutflowCategory =
+  | "INTRANTS" | "SALAIRES" | "LOYER" | "ELECTRICITE" | "EAU" | "ABONNEMENTS" | "TRANSPORT" | "ENTRETIEN" | "TAXES" | "AUTRE"
+  | "ENERGIE_EAU"; // ancienne catégorie, conservée pour l'historique
+/** Catégories proposées à la saisie, dans l'ordre d'affichage. */
+export const OUTFLOW_CATEGORIES: OutflowCategory[] = ["INTRANTS", "SALAIRES", "LOYER", "ELECTRICITE", "EAU", "ABONNEMENTS", "TRANSPORT", "ENTRETIEN", "TAXES", "AUTRE"];
+/** Toutes les catégories, y compris les anciennes (rapports, filtres, validation). */
+export const ALL_OUTFLOW_CATEGORIES: OutflowCategory[] = [...OUTFLOW_CATEGORIES, "ENERGIE_EAU"];
 export const OUTFLOW_CATEGORY_LABEL: Record<OutflowCategory, string> = {
-  INTRANTS: "Achat d'intrants",
+  INTRANTS: "Intrants (produits)",
   SALAIRES: "Salaires",
   LOYER: "Loyer",
-  ENERGIE_EAU: "Électricité et eau",
+  ELECTRICITE: "Électricité",
+  EAU: "Eau",
+  ABONNEMENTS: "Abonnements (TV…)",
   TRANSPORT: "Transport",
   ENTRETIEN: "Entretien et réparations",
   TAXES: "Impôts et taxes",
-  AUTRE: "Autre",
+  AUTRE: "Autres",
+  ENERGIE_EAU: "Électricité et eau",
 };
 export type OutflowMethod = Method | "BANQUE";
 export const OUTFLOW_METHODS: OutflowMethod[] = ["ESPECES", "MTN_MOMO", "ORANGE_MONEY", "BANQUE"];
@@ -41,6 +49,6 @@ export const EXPENSE_CATEGORIES = ["Intrants", "Transport", "Énergie", "Autre"]
 export function expenseToOutflowCategory(c: string): OutflowCategory {
   if (c === "Intrants" || c === "Consommables") return "INTRANTS";
   if (c === "Transport") return "TRANSPORT";
-  if (c === "Énergie") return "ENERGIE_EAU";
+  if (c === "Énergie") return "ELECTRICITE";
   return "AUTRE";
 }

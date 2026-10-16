@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm
 import { db } from "../db";
 import { expenses, outflows, payments, user } from "../db/schema";
 import { TZ } from "@/lib/domain/dates";
-import { expenseToOutflowCategory, OUTFLOW_CATEGORIES, type OutflowCategory } from "@/lib/domain/cash";
+import { ALL_OUTFLOW_CATEGORIES, expenseToOutflowCategory, type OutflowCategory } from "@/lib/domain/cash";
 
 type Row = { month: string; total: number };
 function rows(r: unknown): Row[] {
@@ -54,7 +54,7 @@ export async function expensesByCategory(from: Date, to: Date): Promise<{ catego
   const map = new Map<OutflowCategory, number>();
   for (const r of o) map.set(r.category, (map.get(r.category) ?? 0) + Number(r.total));
   for (const r of e) { const c = expenseToOutflowCategory(r.category); map.set(c, (map.get(c) ?? 0) + Number(r.total)); }
-  return OUTFLOW_CATEGORIES.map((c) => ({ category: c, total: map.get(c) ?? 0 })).filter((x) => x.total > 0).sort((a, b) => b.total - a.total);
+  return ALL_OUTFLOW_CATEGORIES.map((c) => ({ category: c, total: map.get(c) ?? 0 })).filter((x) => x.total > 0).sort((a, b) => b.total - a.total);
 }
 
 export async function salesBetween(from: Date, to: Date) {
@@ -65,7 +65,7 @@ export async function salesBetween(from: Date, to: Date) {
 
 export type MoneyOut = {
   id: string; source: "SORTIE" | "CAISSE"; at: Date; category: OutflowCategory; label: string; amount: number; method: string;
-  beneficiary: string | null; salaryPeriod: string | null; by: string | null; voided: boolean; voidReason: string | null;
+  beneficiary: string | null; beneficiaryUserId: string | null; salaryPeriod: string | null; by: string | null; voided: boolean; voidReason: string | null;
 };
 
 /** Toutes les sorties d'argent d'une période : sorties du gérant et dépenses de caisse. */
@@ -78,17 +78,22 @@ export async function listMoneyOut(from: Date, to: Date): Promise<MoneyOut[]> {
   ]);
   return [
     ...o.map(({ x, by }) => ({ id: x.id, source: "SORTIE" as const, at: x.occurredAt, category: x.category, label: x.label, amount: x.amount, method: x.method,
-      beneficiary: x.beneficiary, salaryPeriod: x.salaryPeriod, by, voided: !!x.voidedAt, voidReason: x.voidReason })),
+      beneficiary: x.beneficiary, beneficiaryUserId: x.beneficiaryUserId, salaryPeriod: x.salaryPeriod, by, voided: !!x.voidedAt, voidReason: x.voidReason })),
     ...e.map(({ x, by }) => ({ id: x.id, source: "CAISSE" as const, at: x.createdAt, category: expenseToOutflowCategory(x.category), label: x.label, amount: x.amount, method: x.method,
-      beneficiary: null, salaryPeriod: null, by, voided: !!x.voidedAt, voidReason: x.voidReason })),
+      beneficiary: null, beneficiaryUserId: null, salaryPeriod: null, by, voided: !!x.voidedAt, voidReason: x.voidReason })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 }
 
-/** Noms déjà payés en salaire + comptes utilisateurs, pour la saisie rapide. */
-export async function employeeSuggestions(): Promise<string[]> {
-  const [paid, users] = await Promise.all([
-    db.selectDistinct({ b: outflows.beneficiary }).from(outflows).where(and(eq(outflows.category, "SALAIRES"), isNotNull(outflows.beneficiary))).orderBy(asc(outflows.beneficiary)),
-    db.select({ b: user.name }).from(user).where(sql`coalesce(${user.banned}, false) = false`),
+export type SalaryStaff = { id: string; name: string; role: string; lastAmount: number | null; lastPeriod: string | null };
+
+/** Employés payables : les comptes utilisateurs actifs, avec leur dernier salaire pour préremplir le montant. */
+export async function salaryStaff(): Promise<SalaryStaff[]> {
+  const [staff, last] = await Promise.all([
+    db.select({ id: user.id, name: user.name, role: user.role }).from(user).where(sql`coalesce(${user.banned}, false) = false`).orderBy(asc(user.name)),
+    db.selectDistinctOn([outflows.beneficiaryUserId], { userId: outflows.beneficiaryUserId, amount: outflows.amount, period: outflows.salaryPeriod }).from(outflows)
+      .where(and(eq(outflows.category, "SALAIRES"), isNotNull(outflows.beneficiaryUserId), isNull(outflows.voidedAt)))
+      .orderBy(outflows.beneficiaryUserId, desc(outflows.occurredAt)),
   ]);
-  return [...new Set([...paid.map((p) => p.b!), ...users.map((u) => u.b)])].sort((a, b) => a.localeCompare(b, "fr"));
+  const byUser = new Map(last.map((l) => [l.userId!, l]));
+  return staff.map((u) => ({ ...u, lastAmount: byUser.get(u.id)?.amount ?? null, lastPeriod: byUser.get(u.id)?.period ?? null }));
 }

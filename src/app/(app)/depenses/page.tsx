@@ -2,14 +2,13 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { TZDate } from "@date-fns/tz";
 import { pageAdmin } from "@/server/session";
-import { employeeSuggestions, expensesByCategory, listMoneyOut, salesBetween } from "@/server/queries/finance";
+import { expensesByCategory, listMoneyOut, salaryStaff, salesBetween } from "@/server/queries/finance";
 import { Card, CardHeader, EmptyState, PageHeader, Stat } from "@/components/ui/card";
 import { CategoryBars } from "@/components/charts/category-bars";
-import { Money } from "@/components/money";
 import { formatAmount } from "@/lib/domain/money";
-import { formatDate, inTz, TZ } from "@/lib/domain/dates";
+import { inTz, TZ } from "@/lib/domain/dates";
 import { OUTFLOW_CATEGORY_LABEL } from "@/lib/domain/cash";
-import { OutflowActions, MoneyOutTable } from "./outflows-ui";
+import { OutflowActions, MoneyOutTable, SalaryBoard } from "./outflows-ui";
 
 export const metadata = { title: "Dépenses" };
 
@@ -25,9 +24,10 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const key = (d: Date) => { const z = inTz(d); return `${z.getFullYear()}-${String(z.getMonth() + 1).padStart(2, "0")}`; };
   const prev = key(new Date(from.getTime() - 86_400_000));
   const next = key(new Date(to.getTime() + 86_400_000));
+  const period = `${y}-${String(m).padStart(2, "0")}`;
   const isCurrent = key(new Date()) === `${y}-${String(m).padStart(2, "0")}`;
 
-  const [sales, cats, moves, suggestions] = await Promise.all([salesBetween(from, to), expensesByCategory(from, to), listMoneyOut(from, to), employeeSuggestions()]);
+  const [sales, cats, moves, staff] = await Promise.all([salesBetween(from, to), expensesByCategory(from, to), listMoneyOut(from, to), salaryStaff()]);
   const totalOut = cats.reduce((s, c) => s + c.total, 0);
   const profit = sales - totalOut;
   const salaries = moves.filter((x) => x.category === "SALAIRES" && !x.voided);
@@ -35,7 +35,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader title="Dépenses et sorties d'argent" description="Achats d'intrants, salaires, loyer, énergie… et dépenses de caisse."
-        actions={<OutflowActions suggestions={suggestions} defaultPeriod={`${y}-${String(m).padStart(2, "0")}`} />} />
+        actions={<OutflowActions staff={staff} defaultPeriod={period} />} />
 
       <div className="mb-6 flex items-center gap-2">
         <Link href={`/depenses?mois=${prev}`} className="grid size-10 place-items-center rounded-md border border-line-2 bg-surface text-ink-2 hover:bg-subtle" aria-label="Mois précédent"><ChevronLeft className="size-4" /></Link>
@@ -58,22 +58,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
             {cats.length ? <CategoryBars data={cats.map((c) => ({ label: OUTFLOW_CATEGORY_LABEL[c.category], total: c.total }))} /> : <EmptyState title="Aucune dépense ce mois-ci" />}
           </div>
         </Card>
-        <Card>
-          <CardHeader title="Salaires du mois" description="Paiements enregistrés sur la période" />
-          {salaries.length ? (
-            <ul className="divide-y divide-line border-t border-line">
-              {salaries.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-3 px-5 py-3">
-                  <div>
-                    <p className="font-medium">{s.beneficiary}</p>
-                    <p className="text-[13px] text-ink-3 tnum">Salaire {s.salaryPeriod && `${MONTHS[Number(s.salaryPeriod.slice(5)) - 1]} ${s.salaryPeriod.slice(0, 4)}`} · payé le {formatDate(s.at)}</p>
-                  </div>
-                  <Money value={s.amount} strong />
-                </li>
-              ))}
-            </ul>
-          ) : <EmptyState title="Aucun salaire payé">Utilisez « Payer un salaire » pour l&apos;enregistrer.</EmptyState>}
-        </Card>
+        <SalaryBoard staff={staff} period={period} periodLabel={`${MONTHS[m - 1]} ${y}`}
+          paid={salaries.map((x) => ({ id: x.id, userId: x.beneficiaryUserId, name: x.beneficiary ?? x.label, amount: x.amount, at: x.at.toISOString() }))} />
       </div>
 
       <MoneyOutTable rows={moves.map((x) => ({ ...x, at: x.at.toISOString() }))} />

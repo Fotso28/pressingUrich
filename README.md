@@ -45,11 +45,25 @@ pnpm dev
 
 ### Données de démonstration
 
-`pnpm db:seed-demo` génère, de novembre 2025 à aujourd'hui (`DEMO_START` pour changer) : ~235 clients aux noms
-camerounais dont **70 % d'habitués**, ~1 300 commandes, un CA encaissé de **400 000 à 700 000 FCFA par mois
-(moyenne ≈ 580 000)**, deux agents (`paul`, `brigitte`, mot de passe `DEMO_AGENT_PASSWORD`, défaut `agent123`),
-une caisse par agent et par jour, dépenses, salaires, loyer, factures et achats d'intrants.
-`DEMO_RESET=1` efface les données métier avant de régénérer.
+`pnpm db:seed-demo` génère, de novembre 2025 à la fermeture du jour courant (`DEMO_START` pour changer) :
+~240 clients aux noms camerounais dont **70 % d'habitués**, ~1 600 commandes, deux agents (`paul`, `brigitte`,
+mot de passe `DEMO_AGENT_PASSWORD`, défaut `agent123`), une caisse par agent et par jour, et les charges de chaque mois :
+
+| Charge | Montant mensuel (FCFA) |
+|---|---|
+| Loyer | 75 000 |
+| Eau | 15 000 |
+| Salaire agent 1 / agent 2 (liés aux comptes utilisateurs) | 75 000 / 45 000 |
+| Intrants (produits) | 30 000 – 50 000 |
+| Abonnement TV Canal+ | 5 000 |
+| Électricité | 30 000 – 50 000 |
+| Autres | 10 000 – 30 000 |
+
+Le **bénéfice de chaque mois complet tombe entre 310 000 et 440 000 FCFA** (CA encaissé ≈ 660 000 – 740 000).
+Tous les montants sont des multiples de 100 FCFA, le plus souvent de 500.
+`DEMO_RESET=1` efface les données métier avant de régénérer. Au build Vercel (`SEED_DEMO=1`), le jeu est
+régénéré une seule fois quand `DEMO_VERSION` change dans `scripts/seed-demo.ts` : **retirez `SEED_DEMO`
+des variables Vercel avant de saisir de vraies données.**
 
 ## Déploiement (Vercel + Neon)
 

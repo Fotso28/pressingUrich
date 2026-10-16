@@ -75,7 +75,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         {!session && <div className="mb-6"><OpenCashCard compact /></div>}
         <div className="mb-6"><ActionTiles /></div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <Stat label="CA du jour" value={formatAmount(d.day.total)} sub="FCFA encaissés" tone="brand" />
+          <Stat label="CA du jour" value={formatAmount(d.day.total)} sub="FCFA encaissés" tone="brand" href="/encaissements" />
           <Stat label="CA de la semaine" value={formatAmount(d.week.total)} sub="FCFA depuis lundi" />
           <Stat label="CA du mois" value={formatAmount(d.month.total)} sub="FCFA ce mois-ci" />
           <Stat label="Impayés" value={formatAmount(d.counters.unpaidSum)} sub={`${d.counters.unpaidCount} cmd · ${d.counters.abandoned} en souffrance`} tone={d.counters.unpaidSum ? "warning" : undefined} href="/rapports#impayes" />
@@ -87,7 +87,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         </Card>
         <div className="mt-6 grid gap-6 xl:grid-cols-3">
           <Card className="xl:col-span-1">
-            <CardHeader title="Encaissements du jour" description="Par mode de paiement" />
+            <CardHeader title="Encaissements du jour" description="Par mode de paiement" action={<Link href="/encaissements" className="text-sm font-medium text-brand">Détail</Link>} />
             <ul className="divide-y divide-line px-5 pb-2">
               {METHODS.map((m) => (
                 <li key={m} className="flex items-center justify-between py-3">

@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Star } from "lucide-react";
-import { setPrice, upsertItemType, upsertService } from "@/server/actions/catalog";
+import { Plus, Pencil, Star, Trash2, ChevronRight } from "lucide-react";
+import { deleteItemType, deleteService, saveItem, setPrice, upsertService } from "@/server/actions/catalog";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
-import { Field, Input } from "@/components/ui/field";
+import { AmountInput, Field, Input } from "@/components/ui/field";
+import { Money } from "@/components/money";
 import { SaveButton } from "@/components/save-button";
 import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/cn";
@@ -28,13 +29,41 @@ export function CatalogEditor({ items, services, prices }: { items: Item[]; serv
   return (
     <>
       <Card>
-        <CardHeader title="Grille de prix" description="Articles en lignes, services en colonnes. Cellule vide = combinaison non proposée au dépôt."
+        <CardHeader title="Grille de prix" description="Articles et tarifs par service. Sans tarif, la combinaison n'est pas proposée au dépôt."
           action={<div className="flex flex-wrap gap-2">
             <label className="flex items-center gap-2 text-sm text-ink-2"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} className="size-4 accent-[#2F4797]" />Inactifs</label>
             <Button size="sm" variant="secondary" onClick={() => setEditService("new")}><Plus />Service</Button>
             <Button size="sm" onClick={() => setEditItem("new")}><Plus />Article</Button>
           </div>} />
-        <div className="overflow-x-auto border-t border-line">
+        {/* Téléphone : une carte par article, tarifs en résumé */}
+        <ul className="divide-y divide-line border-t border-line md:hidden">
+          {visibleItems.length === 0 && <li className="px-5 py-8 text-center text-sm text-ink-3">Aucun article. Ajoutez le premier avec « Article ».</li>}
+          {visibleItems.map((i) => {
+            const ip = visibleServices.map((s) => ({ s, p: prices.find((x) => x.itemTypeId === i.id && x.serviceId === s.id && x.active) })).filter((x) => x.p);
+            return (
+              <li key={i.id}>
+                <button onClick={() => setEditItem(i)} className={cn("flex w-full items-center gap-3 px-5 py-3 text-left active:bg-subtle", !i.active && "opacity-55")}>
+                  <div className="min-w-0 flex-1">
+                    <p className={cn("flex items-center gap-1.5 font-medium", !i.active && "line-through")}>{i.isFrequent && <Star className="size-3.5 fill-warning text-warning" aria-label="Fréquent" />}{i.name}</p>
+                    <p className="mt-0.5 flex flex-wrap gap-x-3 text-[13px] text-ink-3">
+                      {ip.length ? ip.map(({ s, p }) => <span key={s.id}>{s.shortName} <Money value={p!.amount} unit={false} /></span>) : "Aucun tarif"}
+                    </p>
+                  </div>
+                  <ChevronRight className="size-4 shrink-0 text-ink-3" />
+                </button>
+              </li>
+            );
+          })}
+          {visibleServices.length > 0 && (
+            <li className="flex flex-wrap gap-2 px-5 py-3">
+              <span className="w-full text-[12.5px] font-medium uppercase tracking-[0.04em] text-ink-3">Services</span>
+              {visibleServices.map((s) => (
+                <button key={s.id} onClick={() => setEditService(s)} className={cn("h-9 rounded-full border border-line-2 px-3 text-[13px] font-medium", !s.active && "text-ink-3 line-through")}>{s.name}</button>
+              ))}
+            </li>
+          )}
+        </ul>
+        <div className="hidden overflow-x-auto border-t border-line md:block">
           <table className="w-full min-w-[640px] text-[14.5px]">
             <thead>
               <tr className="border-b border-line bg-canvas/70">
@@ -67,10 +96,10 @@ export function CatalogEditor({ items, services, prices }: { items: Item[]; serv
             </tbody>
           </table>
         </div>
-        <p className="border-t border-line px-5 py-3 text-[13px] text-ink-3">Les prix sont enregistrés à la sortie du champ. Un changement de tarif n&apos;affecte pas les commandes existantes.</p>
+        <p className="border-t border-line px-5 py-3 text-[13px] text-ink-3">Prix en multiples de 100 FCFA, enregistrés à la sortie du champ. Un changement de tarif n&apos;affecte pas les commandes existantes.</p>
       </Card>
 
-      {editItem && <ItemDialog item={editItem === "new" ? null : editItem} nextOrder={items.length} onClose={() => setEditItem(null)} onDone={() => { setEditItem(null); refresh(); }} />}
+      {editItem && <ItemDialog item={editItem === "new" ? null : editItem} nextOrder={items.length} services={services.filter((x) => x.active)} prices={prices} onClose={() => setEditItem(null)} onDone={() => { setEditItem(null); refresh(); }} />}
       {editService && <ServiceDialog service={editService === "new" ? null : editService} onClose={() => setEditService(null)} onDone={() => { setEditService(null); refresh(); }} />}
     </>
   );
@@ -106,20 +135,51 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (b: 
   );
 }
 
-function ItemDialog({ item, nextOrder, onClose, onDone }: { item: Item | null; nextOrder: number; onClose: () => void; onDone: () => void }) {
+/** Bouton de suppression en deux temps (évite les suppressions accidentelles). */
+function DeleteButton({ onConfirm, pending }: { onConfirm: () => void; pending: boolean }) {
+  const [armed, setArmed] = useState(false);
+  return (
+    <Button type="button" variant="ghost" disabled={pending} onClick={() => (armed ? onConfirm() : setArmed(true))}
+      className={cn("mr-auto text-danger hover:bg-danger-50", armed && "bg-danger-50")}>
+      <Trash2 />{armed ? "Confirmer la suppression" : "Supprimer"}
+    </Button>
+  );
+}
+
+function ItemDialog({ item, nextOrder, services, prices, onClose, onDone }: { item: Item | null; nextOrder: number; services: Service[]; prices: Price[]; onClose: () => void; onDone: () => void }) {
   const [f, setF] = useState<Omit<Item, "id">>(item ?? { name: "", isFrequent: true, sortOrder: nextOrder, active: true });
+  const [amounts, setAmounts] = useState<Record<string, number | null>>(() =>
+    Object.fromEntries(services.map((s) => {
+      const p = item && prices.find((x) => x.itemTypeId === item.id && x.serviceId === s.id && x.active);
+      return [s.id, p ? p.amount : null];
+    })));
   const { exec, pending } = useAction();
+  const invalid = Object.values(amounts).some((a) => a !== null && (a < 100 || a % 100 !== 0));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title={item ? "Modifier l'article" : "Nouvel article"}>
-        <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); exec(() => upsertItemType({ ...f, id: item?.id }), { success: "Article enregistré.", onSuccess: onDone }); }}>
+      <DialogContent title={item ? "Modifier l'article" : "Nouvel article"} description="Nom, tarifs par service et affichage au dépôt.">
+        <form className="space-y-4" onSubmit={(e) => {
+          e.preventDefault();
+          exec(() => saveItem({ ...f, id: item?.id, prices: services.map((s) => ({ serviceId: s.id, amount: amounts[s.id] ?? null })) }),
+            { success: item ? "Article modifié." : "Article créé.", onSuccess: onDone });
+        }}>
           <Field label="Nom"><Input autoFocus required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="ex. Chemise" /></Field>
+          <fieldset className="space-y-3 rounded-lg border border-line p-4">
+            <legend className="px-1 text-sm font-medium text-ink-2">Tarifs</legend>
+            {services.length === 0 && <p className="text-sm text-ink-3">Créez d&apos;abord un service (ex. Lavage + repassage).</p>}
+            {services.map((s) => (
+              <Field key={s.id} label={s.name} hint={amounts[s.id] === null ? "Laisser vide si le service n'est pas proposé pour cet article." : amounts[s.id]! % 100 !== 0 ? "Multiple de 100 FCFA." : undefined}>
+                <AmountInput value={amounts[s.id]} onChange={(v) => setAmounts({ ...amounts, [s.id]: v })} placeholder="—" />
+              </Field>
+            ))}
+          </fieldset>
           <Field label="Ordre d'affichage"><Input type="number" min={0} value={f.sortOrder} onChange={(e) => setF({ ...f, sortOrder: parseInt(e.target.value || "0", 10) })} /></Field>
           <Toggle checked={f.isFrequent} onChange={(b) => setF({ ...f, isFrequent: b })} label="Bouton rapide au dépôt (article fréquent)" />
-          <Toggle checked={f.active} onChange={(b) => setF({ ...f, active: b })} label="Actif" />
+          <Toggle checked={f.active} onChange={(b) => setF({ ...f, active: b })} label="Actif (proposé au dépôt)" />
           <DialogFooter>
+            {item && <DeleteButton pending={pending} onConfirm={() => exec(() => deleteItemType({ id: item.id }), { success: "Article supprimé.", onSuccess: onDone })} />}
             <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
-            <SaveButton type="submit" loading={pending}>Enregistrer</SaveButton>
+            <SaveButton type="submit" loading={pending} disabled={invalid || f.name.trim().length < 2}>Enregistrer</SaveButton>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -138,6 +198,7 @@ function ServiceDialog({ service, onClose, onDone }: { service: Service | null; 
           <Field label="Nom court (ticket)" hint="12 caractères max."><Input required maxLength={12} value={f.shortName} onChange={(e) => setF({ ...f, shortName: e.target.value })} placeholder="ex. Lav+Rep" /></Field>
           <Toggle checked={f.active} onChange={(b) => setF({ ...f, active: b })} label="Actif" />
           <DialogFooter>
+            {service && <DeleteButton pending={pending} onConfirm={() => exec(() => deleteService({ id: service.id }), { success: "Service supprimé.", onSuccess: onDone })} />}
             <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
             <SaveButton type="submit" loading={pending}>Enregistrer</SaveButton>
           </DialogFooter>

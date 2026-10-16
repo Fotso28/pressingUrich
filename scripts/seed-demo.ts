@@ -2,12 +2,18 @@
  * Jeu de données de démonstration réaliste (à lancer après `pnpm db:seed`).
  *
  *  - Période : de DEMO_START (défaut 2025-11-01) à aujourd'hui.
- *  - CA encaissé : entre 400 000 et 700 000 FCFA par mois complet, moyenne ≈ 580 000.
+ *  - Charges mensuelles : loyer 75 000, eau 15 000, salaires 75 000 + 45 000 (versés aux comptes
+ *    des agents), intrants 30 000–50 000, TV Canal+ 5 000, électricité 30 000–50 000, autres 10 000–30 000.
+ *  - Bénéfice de chaque mois complet entre 310 000 et 440 000 FCFA (le CA encaissé en découle).
+ *  - Tous les montants sont des multiples de 100 FCFA, le plus souvent de 500.
  *  - Clients aux noms camerounais ; 70 % sont des habitués qui reviennent régulièrement.
  *  - Deux agents comptoir, une session de caisse par agent et par jour, dépenses, clôtures.
  *
  *   pnpm db:seed-demo                 # refuse si des commandes existent déjà
  *   DEMO_RESET=1 pnpm db:seed-demo    # efface les données métier puis régénère
+ *
+ * Au build Vercel (`--if-empty`, SEED_DEMO=1) : génère si la base est vide, ou régénère une fois
+ * quand DEMO_VERSION change (version enregistrée dans app_meta).
  */
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
@@ -24,7 +30,16 @@ import { normalizeName, normalizePhone } from "../src/lib/domain/normalize";
 
 const TZ = "Africa/Douala";
 const START = process.env.DEMO_START ?? "2025-11-01";
-const MIN = 400_000, MAX = 700_000, MEAN = 580_000;
+const DEMO_VERSION = "2";
+// Charges fixes mensuelles (FCFA)
+const RENT = 75_000, WATER = 15_000, TV = 5_000;
+const SALARIES = [75_000, 45_000]; // agent 1, agent 2
+// Bénéfice visé par mois complet : tiré dans [PROFIT_MIN + marge, PROFIT_MAX − marge].
+const PROFIT_MIN = 310_000, PROFIT_MAX = 440_000;
+/** Multiple de `step` le plus proche. */
+const roundTo = (v: number, step = 500) => Math.round(v / step) * step;
+/** Montant aléatoire multiple de 500 entre a et b (bornes incluses, multiples de 500). */
+const amount500 = (a: number, b: number) => a + 500 * int(0, (b - a) / 500);
 const N_REGULAR = 170, N_OCCASIONAL = 73; // 70 % d'habitués
 
 // --- Aléatoire déterministe -------------------------------------------------
@@ -47,7 +62,9 @@ const QUARTIERS = ["Bonamoussadi", "Makepe", "Logpom", "Kotto", "Bonapriso", "Ak
 const COLORS = ["blanc", "bleu ciel", "noir", "gris", "beige", "bleu marine", "rouge", "vert", "rose", "bordeaux", "jaune", "multicolore"];
 const BRANDS = ["Zara", "H&M", "Celio", "Hugo Boss", "Lacoste", "Mango", "Pagne Vlisco", "Tissu local", "Ralph Lauren", "Sans marque"];
 const OBS = ["tache au col", "tache d'huile", "bouton manquant", "petite déchirure à la manche", "tache de vin", "ourlet décousu", "col jauni", "tache d'encre", "fermeture éclair fragile"];
-const EXPENSES = [["Lessive (sac 5 kg)", "Intrants", 4500], ["Eau de Javel", "Intrants", 1500], ["Transport livraison", "Transport", 1000], ["Cintres et housses", "Intrants", 2500], ["Électricité (recharge)", "Énergie", 5000], ["Sachets plastiques", "Intrants", 1500], ["Détachant", "Intrants", 3000], ["Moto-taxi courses", "Transport", 500]] as const;
+// Petites dépenses payées à la caisse (comptées dans les intrants ou les autres dépenses du mois).
+const CASH_INTRANTS = [["Lessive (sac 5 kg)", 4500], ["Eau de Javel", 1500], ["Cintres et housses", 2500], ["Sachets plastiques", 1500], ["Détachant", 3000], ["Amidon", 2000]] as const;
+const CASH_OTHER = [["Moto-taxi courses", 500], ["Transport livraison", 1000], ["Fournitures (stylos, carnets)", 1500], ["Eau potable", 500]] as const;
 const ITEM_WEIGHT: Record<string, number> = { "Chemise": 30, "Pantalon": 24, "Tee-shirt": 10, "Robe": 9, "Jupe": 6, "Costume (2 pièces)": 6, "Veste": 5, "Boubou": 6, "Kaba": 4, "Pull": 3, "Manteau": 1, "Cravate": 2, "Drap": 6, "Couette": 2, "Rideau": 2 };
 
 // --- Dates à Douala ---------------------------------------------------------
@@ -84,9 +101,15 @@ async function main() {
   }
 
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(s.orders);
-  if (n > 0 && IF_EMPTY) { console.log("Données déjà présentes : seed de démonstration ignoré."); await close(); return; }
-  if (n > 0 && process.env.DEMO_RESET !== "1") throw new Error(`${n} commandes existent déjà. Relancez avec DEMO_RESET=1 pour tout effacer et régénérer.`);
-  if (process.env.DEMO_RESET === "1") {
+  const [meta] = await db.select().from(s.appMeta).where(eq(s.appMeta.key, "demo_version")).limit(1);
+  let reset = process.env.DEMO_RESET === "1";
+  if (n > 0 && IF_EMPTY) {
+    if (meta?.value === DEMO_VERSION) { console.log("Données de démonstration à jour : seed ignoré."); await close(); return; }
+    console.log(`Jeu de démonstration v${meta?.value ?? "1"} → v${DEMO_VERSION} : régénération.`);
+    reset = true;
+  }
+  if (n > 0 && !reset) throw new Error(`${n} commandes existent déjà. Relancez avec DEMO_RESET=1 pour tout effacer et régénérer.`);
+  if (reset) {
     await db.execute(sql`TRUNCATE outflows, cash_session_counts, expenses, payments, order_status_history, order_items, orders, cash_sessions, customers RESTART IDENTITY CASCADE`);
     await db.execute(sql`ALTER SEQUENCE order_number_seq RESTART WITH 1`);
     console.log("Données métier effacées.");
@@ -122,8 +145,12 @@ async function main() {
   }
   const staff = [...agents, { id: admin.id, name: admin.name }];
 
-  // Période
-  const now = new Date();
+  // Période : jusqu'à la fermeture du jour courant (19 h 30), pour que le tableau de bord du jour soit vivant
+  // même quand le déploiement a lieu tôt le matin.
+  const realNow = new Date();
+  const zNow = local(realNow);
+  const closing = at(zNow.getFullYear(), zNow.getMonth(), zNow.getDate(), 19, 30);
+  const now = closing > realNow ? closing : realNow;
   const [sy, sm] = START.split("-").map(Number);
   const startDate = at(sy, sm - 1, 1, 0, 0);
   const months: { key: string; y: number; m: number; days: number; openDays: number[]; target: number }[] = [];
@@ -132,20 +159,28 @@ async function main() {
     const openDays = Array.from({ length: days }, (_, i) => i + 1).filter((d) => at(y, m, d, 12, 0).getTime() <= now.getTime() && local(at(y, m, d, 12, 0)).getDay() !== 0);
     months.push({ key: `${y}-${String(m + 1).padStart(2, "0")}`, y, m, days, openDays, target: 0 });
   }
-  // Objectifs mensuels : tirés dans [MIN, MAX], recentrés sur MEAN, saisonnalité (fêtes de fin d'année, rentrée).
-  const SEASON: Record<number, number> = { 11: 1.12, 0: 0.9, 7: 0.93, 8: 1.06, 3: 1.04 };
+  // Budgets de charges et bénéfice visé par mois ; le CA visé en découle.
+  type Budget = { electricity: number; intrants: number; other: number; profit: number; cashIntrants: number; cashOther: number };
+  const SEASON: Record<number, number> = { 11: 1.05, 0: 0.96, 7: 0.97, 8: 1.03 };
   const full = months.filter((mo) => mo.openDays.length >= 20 || mo.openDays.includes(mo.days) || mo.openDays.includes(mo.days - 1));
-  let raw = full.map((mo) => (MEAN + (rnd() - 0.5) * 220_000) * (SEASON[mo.m] ?? 1));
-  for (let k = 0; k < 20; k++) {
-    const shift = MEAN - raw.reduce((a, b) => a + b, 0) / raw.length;
-    raw = raw.map((v) => Math.min(MAX - 45_000, Math.max(MIN + 45_000, v + shift)));
+  const budgets = new Map<string, Budget>();
+  for (const mo of months) {
+    const intrants = amount500(30_000, 50_000), other = amount500(12_000, 26_000);
+    budgets.set(mo.key, {
+      electricity: amount500(30_000, 50_000), intrants, other,
+      profit: Math.min(PROFIT_MAX - 25_000, Math.max(PROFIT_MIN + 25_000, (360_000 + rnd() * 70_000) * (SEASON[mo.m] ?? 1))),
+      // Une partie des intrants et des autres dépenses est réglée en petites sommes à la caisse.
+      cashIntrants: roundTo(intrants * (0.25 + rnd() * 0.2)), cashOther: roundTo(Math.min(8_000, other * (0.25 + rnd() * 0.2))),
+    });
   }
+  const monthCharges = (b: Budget) => RENT + WATER + TV + SALARIES[0] + SALARIES[1] + b.electricity + b.intrants + b.other;
   // Légère compensation : une partie des dépôts de fin de mois est encaissée le mois suivant ou reste impayée.
-  full.forEach((mo, i) => (mo.target = Math.round((raw[i] * 1.016) / 1000) * 1000));
+  for (const mo of full) { const b = budgets.get(mo.key)!; mo.target = roundTo((monthCharges(b) + b.profit) * 1.016, 1000); }
   for (const mo of months) if (!mo.target) {
     // Mois en cours : objectif proratisé sur les jours ouvrés écoulés.
+    const b = budgets.get(mo.key)!;
     const totalOpen = Array.from({ length: mo.days }, (_, i) => i + 1).filter((d) => local(at(mo.y, mo.m, d, 12, 0)).getDay() !== 0).length;
-    mo.target = Math.round((MEAN * mo.openDays.length) / totalOpen / 1000) * 1000;
+    mo.target = roundTo(((monthCharges(b) + b.profit) * mo.openDays.length) / totalOpen, 1000);
   }
 
   // Clients : 70 % d'habitués
@@ -242,9 +277,9 @@ async function main() {
         }
         const subtotal = lines.reduce((a, l) => a + l.cat.amount * l.qty, 0);
         const isExpress = chance(0.09);
-        const expressAmount = isExpress ? Math.round(subtotal * 0.5) : 0;
-        const discountPct = c.regular && c.visits > 6 && chance(0.12) ? 5 : 0;
-        const discountAmount = Math.round(((subtotal + expressAmount) * discountPct) / 100);
+        const expressAmount = isExpress ? Math.ceil((subtotal * 0.5) / 100) * 100 : 0; // comme computeOrderTotals
+        // Geste commercial pour les fidèles : remise ronde de 500 ou 1 000 FCFA.
+        const discountAmount = c.regular && c.visits > 6 && subtotal >= 4000 && chance(0.12) ? (subtotal >= 10_000 ? 1000 : 500) : 0;
         const total = subtotal + expressAmount - discountAmount;
 
         // Cycle de vie
@@ -282,7 +317,7 @@ async function main() {
         number++;
         orders.push({
           id, number, customerId: c.id, status, isExpress, expressRatePct: isExpress ? 50 : 0, subtotal, expressAmount,
-          discountType: discountPct ? "POURCENT" : null, discountValue: discountPct, discountAmount, total, amountPaid, dueAt,
+          discountType: discountAmount ? "MONTANT" : null, discountValue: discountAmount, discountAmount, total, amountPaid, dueAt,
           notes: chance(0.04) ? pick(["Repassage sans pli", "Ne pas amidonner", "Client passera samedi", "Livraison souhaitée"]) : null,
           idempotencyKey: randomUUID(), createdBy: agent.id, createdAt: when, updatedAt: when,
           readyAt: status === "PRETE" || status === "RETIREE" ? readyAt : null,
@@ -309,13 +344,22 @@ async function main() {
   const exps: (typeof s.expenses.$inferInsert)[] = [];
   const counts: (typeof s.cashSessionCounts.$inferInsert)[] = [];
   const sessionRows: (typeof s.cashSessions.$inferInsert)[] = [];
-  for (const ss of sessions.values()) {
-    const nExp = weighted([0, 1, 2], (k) => [55, 35, 10][k]);
+  const cashSpent = new Map<string, { intrants: number; other: number }>();
+  for (const ss of [...sessions.values()].sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime())) {
+    const mk = monthKey(ss.openedAt);
+    const b = budgets.get(mk)!;
+    const spent = cashSpent.get(mk) ?? { intrants: 0, other: 0 };
+    cashSpent.set(mk, spent);
+    const nExp = weighted([0, 1, 2], (k) => [62, 30, 8][k]);
     for (let i = 0; i < nExp; i++) {
-      const [label, category, amount] = pick(EXPENSES);
+      const isIntrant = chance(0.6);
+      const [label, amount] = isIntrant ? pick(CASH_INTRANTS) : pick(CASH_OTHER);
+      // Reste dans la part du budget mensuel réglée à la caisse.
+      if (isIntrant ? spent.intrants + amount > b.cashIntrants : spent.other + amount > b.cashOther) continue;
       const when = addH(ss.openedAt, 1 + rnd() * 9);
       if (when > now) continue;
-      exps.push({ cashSessionId: ss.id, label, category, method: chance(0.85) ? "ESPECES" : "MTN_MOMO", amount, createdBy: ss.userId, createdAt: when });
+      if (isIntrant) spent.intrants += amount; else spent.other += amount;
+      exps.push({ cashSessionId: ss.id, label, category: isIntrant ? "Intrants" : "Autre", method: chance(0.85) ? "ESPECES" : "MTN_MOMO", amount, createdBy: ss.userId, createdAt: when });
     }
     let comment: string | null = null;
     if (ss.closedAt) {
@@ -332,31 +376,43 @@ async function main() {
     sessionRows.push({ id: ss.id, userId: ss.userId, status: ss.closedAt ? "FERMEE" : "OUVERTE", openingFloat: ss.float, openedAt: ss.openedAt, closedAt: ss.closedAt, closingComment: comment });
   }
 
-  // Sorties d'argent du gérant : salaires, loyer, factures, achats d'intrants, entretien, taxes.
+  // CA encaissé par mois (pour ajuster les « autres dépenses » sur le bénéfice visé).
+  const byMonth = new Map<string, number>();
+  for (const p of pays) byMonth.set(monthKey(p.at), (byMonth.get(monthKey(p.at)) ?? 0) + (p.amount as number));
+
+  // Sorties d'argent du gérant : loyer, eau, électricité, TV, intrants, autres, salaires des agents.
   const outRows: (typeof s.outflows.$inferInsert)[] = [];
-  const STAFF_PAY: [string, number][] = [[agents[0].name, 55_000], [agents[1].name, 55_000], ["Mbarga Hervé (repasseur)", 50_000], ["Onana Cécile (lavandière)", 45_000]];
   for (const mo of months) {
     const days = mo.openDays;
     if (!days.length) continue;
-    const dayAt = (d: number, h = 10) => at(mo.y, mo.m, d, h, int(0, 59));
-    const out = (d: number, category: s.OutflowCategory, label: string, amount: number, method: s.OutflowMethod, beneficiary: string | null = null, salaryPeriod: string | null = null) => {
-      const when = dayAt(d, int(9, 17));
-      if (when <= now) outRows.push({ occurredAt: when, category, label, amount, method, beneficiary, salaryPeriod, createdBy: admin.id, createdAt: when });
-    };
+    const b = budgets.get(mo.key)!;
+    const cash = cashSpent.get(mo.key) ?? { intrants: 0, other: 0 };
     const lastDay = days[days.length - 1];
-    const isComplete = days.length >= 24;
-    out(Math.min(5, lastDay), "LOYER", "Loyer du local", 60_000, "ORANGE_MONEY", "M. Ndoumbe (bailleur)");
-    if (lastDay >= 12) out(12, "ENERGIE_EAU", "Facture ENEO (électricité)", Math.round(int(24, 39) * 1000 / 500) * 500, "MTN_MOMO", "ENEO");
-    if (lastDay >= 14) out(14, "ENERGIE_EAU", "Facture CAMWATER (eau)", int(8, 14) * 1000, "MTN_MOMO", "CAMWATER");
-    if (lastDay >= 3) out(3, "INTRANTS", pick(["Lessive (carton) et eau de Javel", "Lessive, Javel et détachant"]), int(28, 42) * 1000, "ESPECES", "Grossiste Marché Central");
-    if (lastDay >= 18) out(18, "INTRANTS", pick(["Cintres, housses et sachets", "Lessive (carton) et amidon", "Détachant et assouplissant"]), int(15, 30) * 1000, "ESPECES", pick(["Grossiste Marché Central", "Quincaillerie Ndokoti"]));
-    if (chance(0.3) && lastDay >= 21) out(21, "ENTRETIEN", pick(["Réparation machine à laver", "Réparation fer à repasser", "Remplacement résistance séchoir"]), int(10, 35) * 1000, "ESPECES", "Technicien Akwa");
-    if ([0, 3, 6, 9].includes(mo.m) && lastDay >= 15) out(15, "TAXES", "Impôt libératoire (trimestre)", 15_000, "ORANGE_MONEY", "Centre des impôts");
-    if (chance(0.25) && lastDay >= 9) out(9, "TRANSPORT", "Transport achats au marché", int(2, 5) * 1000, "ESPECES");
+    const isComplete = full.includes(mo);
+    const rows: (typeof s.outflows.$inferInsert)[] = [];
+    const out = (d: number, category: s.OutflowCategory, label: string, amount: number, method: s.OutflowMethod, beneficiary: string | null = null, extra: Partial<typeof s.outflows.$inferInsert> = {}) => {
+      if (d > lastDay || amount <= 0) return;
+      const when = at(mo.y, mo.m, Math.min(d, mo.days), int(9, 17), int(0, 59));
+      if (when <= now) rows.push({ occurredAt: when, category, label, amount, method, beneficiary, createdBy: admin.id, createdAt: when, ...extra });
+    };
+    // Intrants : le gros achat du mois au grossiste complète les achats faits à la caisse.
+    const bigIntrants = b.intrants - cash.intrants;
+    out(3, "INTRANTS", pick(["Lessive (carton), Javel et détachant", "Lessive (carton), amidon et cintres", "Produits de lavage et housses"]), bigIntrants, "ESPECES", "Grossiste Marché Central");
+    out(5, "LOYER", "Loyer du local", RENT, "ORANGE_MONEY", "M. Ndoumbe (bailleur)");
+    out(8, "ABONNEMENTS", "Abonnement TV Canal+", TV, "MTN_MOMO", "Canal+");
+    out(12, "ELECTRICITE", "Facture ENEO (électricité)", b.electricity, "MTN_MOMO", "ENEO");
+    out(14, "EAU", "Facture CAMWATER (eau)", WATER, "MTN_MOMO", "CAMWATER");
     if (isComplete) {
-      const period = mo.key;
-      for (const [name, pay] of STAFF_PAY) out(lastDay, "SALAIRES", `Salaire ${name}`, pay, name.includes("(") ? "ESPECES" : "MTN_MOMO", name, period);
+      // Autres dépenses : ajustées pour que le bénéfice tombe sur la cible, dans [10 000, 30 000].
+      const sales = byMonth.get(mo.key) ?? 0;
+      const fixed = RENT + WATER + TV + SALARIES[0] + SALARIES[1] + b.electricity + b.intrants;
+      const other = Math.min(30_000, Math.max(10_000, roundTo(sales - fixed - b.profit)));
+      out(20, "AUTRE", pick(["Réparation fer à repasser", "Recharge gaz et divers", "Fournitures et petit matériel", "Réparation machine à laver"]), Math.max(500, other - cash.other), "ESPECES", pick(["Technicien Akwa", "Quincaillerie Ndokoti", null]));
+      agents.forEach((a, i) => out(lastDay, "SALAIRES", `Salaire ${a.name}`, SALARIES[i], "MTN_MOMO", a.name, { beneficiaryUserId: a.id, salaryPeriod: mo.key }));
+    } else {
+      out(20, "AUTRE", "Fournitures et petit matériel", Math.max(500, b.other - cash.other), "ESPECES", "Quincaillerie Ndokoti");
     }
+    outRows.push(...rows);
   }
 
   // Écriture
@@ -374,11 +430,11 @@ async function main() {
   await chunk(exps, (b) => db.insert(s.expenses).values(b));
   await chunk(counts, (b) => db.insert(s.cashSessionCounts).values(b));
   await chunk(outRows, (b) => db.insert(s.outflows).values(b));
+  await db.insert(s.appMeta).values({ key: "demo_version", value: DEMO_VERSION })
+    .onConflictDoUpdate({ target: s.appMeta.key, set: { value: DEMO_VERSION, updatedAt: new Date() } });
   await db.execute(sql`SELECT setval('order_number_seq', (SELECT coalesce(max(number), 0) + 1 FROM orders), false)`);
 
   // Bilan
-  const byMonth = new Map<string, number>();
-  for (const p of pays) byMonth.set(monthKey(p.at), (byMonth.get(monthKey(p.at)) ?? 0) + (p.amount as number));
   const regularCount = used.filter((c) => c.regular).length;
   console.log(`\nClients : ${used.length} (${regularCount} habitués, soit ${Math.round((regularCount / used.length) * 100)} %)`);
   console.log(`Commandes : ${orders.length} · lignes : ${itemsRows.length} · paiements : ${pays.length} · sessions de caisse : ${sessionRows.length} · dépenses : ${exps.length}`);
@@ -391,7 +447,12 @@ async function main() {
   for (const e of exps) outByMonth.set(monthKey(e.createdAt as Date), (outByMonth.get(monthKey(e.createdAt as Date)) ?? 0) + (e.amount as number));
   console.log("\nDépenses (sorties + caisse) et bénéfice par mois :");
   for (const mo of months) console.log(`  ${mo.key}  dépenses ${String(outByMonth.get(mo.key) ?? 0).padStart(8)}  bénéfice ${String((byMonth.get(mo.key) ?? 0) - (outByMonth.get(mo.key) ?? 0)).padStart(8)}`);
-  console.log(`  Moyenne des mois complets : ${Math.round(fullVals.reduce((a, b) => a + b, 0) / fullVals.length)} · min ${Math.min(...fullVals)} · max ${Math.max(...fullVals)}`);
+  const profits = fullKeys.map((k) => (byMonth.get(k) ?? 0) - (outByMonth.get(k) ?? 0));
+  console.log(`  CA moyen des mois complets : ${Math.round(fullVals.reduce((a, b) => a + b, 0) / fullVals.length)} · min ${Math.min(...fullVals)} · max ${Math.max(...fullVals)}`);
+  console.log(`  Bénéfice des mois complets : min ${Math.min(...profits)} · max ${Math.max(...profits)} (cible ${PROFIT_MIN}–${PROFIT_MAX})`);
+  const odd = [...orders.map((o) => o.total as number), ...pays.map((p) => p.amount as number), ...exps.map((e) => e.amount as number), ...outRows.map((o) => o.amount as number)].filter((v) => v % 100 !== 0).length;
+  const by500 = [...pays.map((p) => p.amount as number), ...exps.map((e) => e.amount as number), ...outRows.map((o) => o.amount as number)];
+  console.log(`  Montants non multiples de 100 : ${odd} · paiements et dépenses multiples de 500 : ${Math.round((by500.filter((v) => v % 500 === 0).length / by500.length) * 100)} %`);
   console.log(`\nComptes de démo : gérant « ${admin.username} », agents « paul » et « brigitte » (mot de passe : DEMO_AGENT_PASSWORD${process.env.DEMO_AGENT_PASSWORD ? "" : ", défaut agent123"}).`);
   await close();
 }
