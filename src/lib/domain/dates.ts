@@ -46,3 +46,7 @@ export function periodStart(period: "day" | "week" | "month", now = new Date()):
   }
   return new Date(new TZDate(y, m, d, 0, 0, 0, TZ).getTime());
 }
+
+const MONTH_NAMES = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+/** « 2026-09 » → « septembre 2026 ». */
+export const monthLabel = (k: string) => `${MONTH_NAMES[Number(k.slice(5)) - 1]} ${k.slice(0, 4)}`;

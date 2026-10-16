@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import { expenses, outflows, payments, user } from "../db/schema";
+import { TZDate } from "@date-fns/tz";
 import { TZ } from "@/lib/domain/dates";
 import { ALL_OUTFLOW_CATEGORIES, expenseToOutflowCategory, type OutflowCategory } from "@/lib/domain/cash";
 
@@ -96,4 +97,29 @@ export async function salaryStaff(): Promise<SalaryStaff[]> {
   ]);
   const byUser = new Map(last.map((l) => [l.userId!, l]));
   return staff.map((u) => ({ ...u, lastAmount: byUser.get(u.id)?.amount ?? null, lastPeriod: byUser.get(u.id)?.period ?? null }));
+}
+
+/** Mois ayant de l'activité (premier paiement ou première sortie → mois courant), du plus récent au plus ancien. */
+export async function availableMonths(): Promise<string[]> {
+  const [r] = await db.select({
+    first: sql<Date | null>`least((select min(${payments.createdAt}) from ${payments}), (select min(${outflows.occurredAt}) from ${outflows}), (select min(${expenses.createdAt}) from ${expenses}))`,
+  }).from(sql`(select 1) as one`);
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit" });
+  const now = fmt.format(new Date());
+  const start = r?.first ? fmt.format(new Date(r.first)) : now;
+  const list: string[] = [];
+  let [y, m] = now.split("-").map(Number);
+  for (;;) {
+    const k = `${y}-${String(m).padStart(2, "0")}`;
+    list.push(k);
+    if (k <= start || list.length > 120) break;
+    m -= 1; if (m === 0) { m = 12; y -= 1; }
+  }
+  return list;
+}
+
+/** Bornes d'un mois « YYYY-MM » dans le fuseau de Douala. */
+export function monthBounds(key: string): { from: Date; to: Date } {
+  const [y, m] = key.split("-").map(Number);
+  return { from: new Date(new TZDate(y, m - 1, 1, 0, 0, 0, TZ).getTime()), to: new Date(new TZDate(y, m, 1, 0, 0, 0, TZ).getTime()) };
 }
