@@ -6,7 +6,9 @@
  *    salaires 75 000 + 45 000 (versés aux comptes des agents), intrants 30 000–50 000, TV Canal+ 5 000,
  *    électricité 30 000–50 000, autres 10 000–30 000. Le mois en cours n'a pas encore réglé eau,
  *    électricité ni salaires (payés en fin de mois).
- *  - Bénéfice de chaque mois complet entre 310 000 et 440 000 FCFA (le CA encaissé en découle).
+ *    Le mois du loyer cumule donc 3 × 75 000 + toutes les autres charges : son bénéfice est nettement plus bas.
+ *  - CA encaissé par mois complet entre 473 000 et 780 000 FCFA, médiane 625 000 ; les deux derniers mois
+ *    (dernier mois complet et mois en cours, au rythme du mois) sont les plus faibles. Le bénéfice en découle.
  *  - Tous les montants sont des multiples de 100 FCFA, le plus souvent de 500.
  *  - Clients aux noms camerounais ; 70 % sont des habitués qui reviennent régulièrement.
  *  - Deux agents comptoir, une session de caisse par agent et par jour, dépenses, clôtures.
@@ -32,13 +34,20 @@ import { normalizeName, normalizePhone } from "../src/lib/domain/normalize";
 
 const TZ = "Africa/Douala";
 const START = process.env.DEMO_START ?? "2025-11-01";
-const DEMO_VERSION = "3";
+const DEMO_VERSION = "4";
 // Charges fixes mensuelles (FCFA)
 const RENT = 75_000, WATER = 15_000, TV = 5_000;
 const RENT_EVERY = 3; // loyer payé par trimestre, le premier mois du trimestre
 const SALARIES = [75_000, 45_000]; // agent 1, agent 2
-// Bénéfice visé par mois complet : tiré dans [PROFIT_MIN + marge, PROFIT_MAX − marge].
-const PROFIT_MIN = 310_000, PROFIT_MAX = 440_000;
+// CA mensuel visé (mois complets) : entre REV_MIN et REV_MAX, médiane REV_MEDIAN.
+const REV_MIN = 473_000, REV_MAX = 780_000, REV_MEDIAN = 625_000;
+/**
+ * Profil du CA des mois complets, du plus ancien au plus récent (fêtes de fin d'année fortes, creux de janvier,
+ * bonne saison sèche, ralentissement de saison des pluies). Médiane 625 000 ; le dernier mois complet est le plus bas
+ * après le mois en cours (REV_CURRENT, au rythme d'un mois entier).
+ */
+const REV_PROFILE = [618_000, 762_000, 548_000, 640_000, 690_000, 731_000, 662_000, 596_000, 571_000, 625_000, 498_000];
+const REV_CURRENT = 490_000;
 /** Multiple de `step` le plus proche. */
 const roundTo = (v: number, step = 500) => Math.round(v / step) * step;
 /** Montant aléatoire multiple de 500 entre a et b (bornes incluses, multiples de 500). */
@@ -194,31 +203,27 @@ async function main() {
     const openDays = Array.from({ length: days }, (_, i) => i + 1).filter((d) => at(y, m, d, 12, 0).getTime() <= now.getTime() && local(at(y, m, d, 12, 0)).getDay() !== 0);
     months.push({ key: `${y}-${String(m + 1).padStart(2, "0")}`, y, m, days, openDays, target: 0 });
   }
-  // Budgets de charges et bénéfice visé par mois ; le CA visé en découle.
-  type Budget = { electricity: number; intrants: number; other: number; profit: number; cashIntrants: number; cashOther: number };
-  const SEASON: Record<number, number> = { 11: 1.05, 0: 0.96, 7: 0.97, 8: 1.03 };
+  // Budgets de charges par mois ; le CA visé suit REV_PROFILE et le bénéfice en découle.
+  type Budget = { electricity: number; intrants: number; other: number; cashIntrants: number; cashOther: number };
   const full = months.filter((mo) => mo.openDays.length >= 20 || mo.openDays.includes(mo.days) || mo.openDays.includes(mo.days - 1));
   const budgets = new Map<string, Budget>();
   for (const mo of months) {
-    const intrants = amount500(30_000, 50_000), other = amount500(12_000, 26_000);
+    const intrants = amount500(30_000, 50_000), other = amount500(10_000, 30_000);
     budgets.set(mo.key, {
       electricity: amount500(30_000, 50_000), intrants, other,
-      profit: Math.min(PROFIT_MAX - 25_000, Math.max(PROFIT_MIN + 25_000, (360_000 + rnd() * 70_000) * (SEASON[mo.m] ?? 1))),
       // Une partie des intrants et des autres dépenses est réglée en petites sommes à la caisse.
       cashIntrants: roundTo(intrants * (0.25 + rnd() * 0.2)), cashOther: roundTo(Math.min(8_000, other * (0.25 + rnd() * 0.2))),
     });
   }
   const rentOf = (mo: (typeof months)[number]) => (months.indexOf(mo) % RENT_EVERY === 0 ? RENT * RENT_EVERY : 0);
-  const monthCharges = (b: Budget, mo: (typeof months)[number]) => rentOf(mo) + WATER + TV + SALARIES[0] + SALARIES[1] + b.electricity + b.intrants + b.other;
-  // Légère compensation : une partie des dépôts de fin de mois est encaissée le mois suivant ou reste impayée.
-  for (const mo of full) { const b = budgets.get(mo.key)!; mo.target = roundTo((monthCharges(b, mo) + b.profit) * 1.016, 1000); }
+  // CA visé : le profil est aligné sur les mois les plus récents (les plus faibles en dernier).
+  const profile = REV_PROFILE.slice(-full.length);
+  while (profile.length < full.length) profile.unshift(REV_MEDIAN);
+  full.forEach((mo, i) => { mo.target = Math.min(REV_MAX, Math.max(REV_MIN, profile[i])); });
   for (const mo of months) if (!mo.target) {
     // Mois en cours : objectif proratisé sur les jours ouvrés écoulés.
-    const b = budgets.get(mo.key)!;
     const totalOpen = Array.from({ length: mo.days }, (_, i) => i + 1).filter((d) => local(at(mo.y, mo.m, d, 12, 0)).getDay() !== 0).length;
-    // Le mois en cours ne règle pas encore eau, électricité ni salaires.
-    const charges = rentOf(mo) + TV + b.intrants + b.other;
-    mo.target = roundTo(((charges + b.profit) * mo.openDays.length) / totalOpen, 1000);
+    mo.target = roundTo((REV_CURRENT * mo.openDays.length) / totalOpen, 1000);
   }
 
   // Clients : 70 % d'habitués
@@ -275,16 +280,19 @@ async function main() {
     if (amount <= 0 || when > now) return;
     const w = worker(when);
     const m = method();
-    pays.push({ id: randomUUID(), orderId, cashSessionId: sessionFor(w.id, when).id, method: m, amount, reference: m === "ESPECES" ? null : (chance(0.7) ? `${m === "MTN_MOMO" ? "MP" : "OM"}${int(100000000, 999999999)}` : null), idempotencyKey: randomUUID(), createdBy: w.id, createdAt: when, at: when });
+    // La session de caisse est rattachée après la génération (le calage du CA rejoue chaque mois).
+    pays.push({ id: randomUUID(), orderId, cashSessionId: "", method: m, amount, reference: m === "ESPECES" ? null : (chance(0.7) ? `${m === "MTN_MOMO" ? "MP" : "OM"}${int(100000000, 999999999)}` : null), idempotencyKey: randomUUID(), createdBy: w.id, createdAt: when, at: when });
   };
 
   let number = 0;
-  const monthAccum = new Map<string, number>();
-  for (const mo of months) {
+  /** Génère les dépôts d'un mois pour un montant total de commandes `target`. */
+  const genMonth = (mo: (typeof months)[number], target: number) => {
+    seed = 20251216 + 7919 * months.indexOf(mo); // même aléa à chaque essai du mois
+    let monthAccum = 0;
     for (let di = 0; di < mo.openDays.length; di++) {
       const d = mo.openDays[di];
       const remainingDays = mo.openDays.length - di;
-      const dayBudget = (mo.target - (monthAccum.get(mo.key) ?? 0)) / remainingDays * (0.75 + rnd() * 0.5);
+      const dayBudget = (target - monthAccum) / remainingDays * (0.75 + rnd() * 0.5);
       let dayTotal = 0;
       const dayOrders: { when: Date }[] = [];
       // Au moins 3 dépôts par jour ouvré : un comptoir n'est jamais vide.
@@ -379,9 +387,31 @@ async function main() {
         dayTotal += total;
         dayOrders.push({ when });
       }
-      monthAccum.set(mo.key, (monthAccum.get(mo.key) ?? 0) + dayTotal);
+      monthAccum += dayTotal;
     }
+  };
+  // Calage mois par mois : le CA encaissé d'un mois = retraits des dépôts antérieurs (déjà connus) + encaissements
+  // des dépôts du mois. On rejoue le mois en ajustant le volume de dépôts jusqu'à tomber sur l'objectif.
+  for (const mo of months) {
+    const snap = { cust: custs.map((c) => [c.visits, c.lastAt, c.firstAt] as const), o: orders.length, i: itemsRows.length, h: history.length, p: pays.length, n: number };
+    const restore = () => {
+      custs.forEach((c, j) => { [c.visits, c.lastAt, c.firstAt] = snap.cust[j]; });
+      orders.length = snap.o; itemsRows.length = snap.i; history.length = snap.h; pays.length = snap.p; number = snap.n;
+    };
+    const cashIn = () => pays.reduce((a, p) => (monthKey(p.at) === mo.key ? a + (p.amount as number) : a), 0);
+    let T = mo.target, best = { T, err: Infinity };
+    for (let pass = 0; pass < 30; pass++) {
+      if (pass) restore();
+      genMonth(mo, T);
+      const got = cashIn();
+      const err = Math.abs(got / mo.target - 1);
+      if (err < best.err) best = { T, err };
+      if (err < 0.003) break;
+      T = roundTo(T * (1 + 0.7 * (mo.target / Math.max(1, got) - 1)) + (pass > 10 ? (rnd() - 0.5) * 6_000 : 0), 500);
+    }
+    if (T !== best.T) { restore(); genMonth(mo, best.T); }
   }
+  for (const p of [...pays].sort((a, b) => a.at.getTime() - b.at.getTime())) p.cashSessionId = sessionFor(p.createdBy as string, p.at).id;
   orders.sort((a, b) => (a.createdAt as Date).getTime() - (b.createdAt as Date).getTime());
   const renumber = new Map(orders.map((o, i) => [o.id, i + 1]));
   orders.forEach((o) => (o.number = renumber.get(o.id)!));
@@ -422,7 +452,7 @@ async function main() {
     sessionRows.push({ id: ss.id, userId: ss.userId, status: ss.closedAt ? "FERMEE" : "OUVERTE", openingFloat: ss.float, openedAt: ss.openedAt, closedAt: ss.closedAt, closingComment: comment });
   }
 
-  // CA encaissé par mois (pour ajuster les « autres dépenses » sur le bénéfice visé).
+  // CA encaissé par mois (bilan).
   const byMonth = new Map<string, number>();
   for (const p of pays) byMonth.set(monthKey(p.at), (byMonth.get(monthKey(p.at)) ?? 0) + (p.amount as number));
 
@@ -456,11 +486,7 @@ async function main() {
       out(lastDay - 1, "EAU", "Facture CAMWATER (eau)", WATER, "MTN_MOMO", "CAMWATER");
     }
     if (isComplete) {
-      // Autres dépenses : ajustées pour que le bénéfice tombe sur la cible, dans [10 000, 30 000].
-      const sales = byMonth.get(mo.key) ?? 0;
-      const fixed = rentOf(mo) + WATER + TV + SALARIES[0] + SALARIES[1] + b.electricity + b.intrants;
-      const other = Math.min(30_000, Math.max(10_000, roundTo(sales - fixed - b.profit)));
-      out(20, "AUTRE", pick(["Réparation fer à repasser", "Recharge gaz et divers", "Fournitures et petit matériel", "Réparation machine à laver"]), Math.max(500, other - cash.other), "ESPECES", pick(["Technicien Akwa", "Quincaillerie Ndokoti", null]));
+      out(20, "AUTRE", pick(["Réparation fer à repasser", "Recharge gaz et divers", "Fournitures et petit matériel", "Réparation machine à laver"]), Math.max(500, b.other - cash.other), "ESPECES", pick(["Technicien Akwa", "Quincaillerie Ndokoti", null]));
       agents.forEach((a, i) => out(lastDay, "SALAIRES", `Salaire ${a.name}`, SALARIES[i], "MTN_MOMO", a.name, { beneficiaryUserId: a.id, salaryPeriod: mo.key }));
     } else {
       out(20, "AUTRE", "Fournitures et petit matériel", Math.max(500, b.other - cash.other), "ESPECES", "Quincaillerie Ndokoti");
@@ -501,8 +527,9 @@ async function main() {
   console.log("\nDépenses (sorties + caisse) et bénéfice par mois :");
   for (const mo of months) console.log(`  ${mo.key}  dépenses ${String(outByMonth.get(mo.key) ?? 0).padStart(8)}  bénéfice ${String((byMonth.get(mo.key) ?? 0) - (outByMonth.get(mo.key) ?? 0)).padStart(8)}`);
   const profits = fullKeys.map((k) => (byMonth.get(k) ?? 0) - (outByMonth.get(k) ?? 0));
-  console.log(`  CA moyen des mois complets : ${Math.round(fullVals.reduce((a, b) => a + b, 0) / fullVals.length)} · min ${Math.min(...fullVals)} · max ${Math.max(...fullVals)}`);
-  console.log(`  Bénéfice des mois complets : min ${Math.min(...profits)} · max ${Math.max(...profits)} (cible ${PROFIT_MIN}–${PROFIT_MAX})`);
+  const sorted = [...fullVals].sort((a, b) => a - b);
+  console.log(`  CA des mois complets : min ${sorted[0]} · médiane ${sorted[Math.floor(sorted.length / 2)]} · max ${sorted[sorted.length - 1]} (cible ${REV_MIN}–${REV_MAX}, médiane ${REV_MEDIAN})`);
+  console.log(`  Bénéfice des mois complets : min ${Math.min(...profits)} · max ${Math.max(...profits)}`);
   const odd = [...orders.map((o) => o.total as number), ...pays.map((p) => p.amount as number), ...exps.map((e) => e.amount as number), ...outRows.map((o) => o.amount as number)].filter((v) => v % 100 !== 0).length;
   const by500 = [...pays.map((p) => p.amount as number), ...exps.map((e) => e.amount as number), ...outRows.map((o) => o.amount as number)];
   console.log(`  Montants non multiples de 100 : ${odd} · paiements et dépenses multiples de 500 : ${Math.round((by500.filter((v) => v % 500 === 0).length / by500.length) * 100)} %`);
