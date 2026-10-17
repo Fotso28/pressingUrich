@@ -117,16 +117,26 @@ test.describe.serial("Parcours du comptoir", () => {
     await page.getByRole("link", { name: "Voir la commande" }).click();
     await expect(page.getByText(/Linge blanc · 2,5 kg/)).toBeVisible();
 
-    // Nouveau dépôt du même client : il achète un forfait de 23 kg, ses 6,5 kg en sont déduits.
+    // Vente d'un forfait de 23 kg, seul sur son ticket (réglé en entier, clos aussitôt).
     await page.getByRole("link", { name: "Client Forfait Test" }).click();
     await page.getByRole("link", { name: /Nouveau dépôt pour ce client/ }).click();
     await page.getByRole("tab", { name: "Au kilo" }).click();
     await expect(page.getByText(/Solde forfait ·/)).toBeVisible();
     await page.getByRole("button", { name: /^23 kg/ }).click();
+    await page.getByRole("button", { name: "Tout" }).click();
+    await page.getByRole("button", { name: "Valider le dépôt" }).click();
+    await page.waitForURL(/\/depot\/confirmation\//);
+    await page.getByRole("link", { name: "Voir la commande" }).click();
+    await expect(page.getByText("Retirée", { exact: true }).first()).toBeVisible();
+
+    // Dépôt suivant : ses 6,5 kg sont déduits du forfait.
+    await page.getByRole("link", { name: "Client Forfait Test" }).click();
+    await page.getByRole("link", { name: /Nouveau dépôt pour ce client/ }).click();
+    await page.getByRole("tab", { name: "Au kilo" }).click();
+    await expect(page.getByText(/23 kg/).first()).toBeVisible();
     await page.getByLabel("Poids en kg").fill("6,5");
     await page.getByRole("button", { name: "Ajouter" }).click();
     await expect(page.getByText("Déduit du solde forfait")).toBeVisible();
-    await page.getByRole("button", { name: "Tout" }).click();
     await page.getByRole("button", { name: "Valider le dépôt" }).click();
     await page.waitForURL(/\/depot\/confirmation\//);
     await page.getByRole("link", { name: "Voir la commande" }).click();

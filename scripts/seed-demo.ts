@@ -34,7 +34,7 @@ import { normalizeName, normalizePhone } from "../src/lib/domain/normalize";
 
 const TZ = "Africa/Douala";
 const START = process.env.DEMO_START ?? "2025-11-01";
-const DEMO_VERSION = "8";
+const DEMO_VERSION = "9";
 // Charges fixes mensuelles (FCFA)
 const RENT = 75_000, WATER = 15_000, TV = 5_000;
 const RENT_EVERY = 3; // loyer payé par trimestre, le premier mois du trimestre
@@ -304,6 +304,27 @@ async function main() {
   };
 
   let number = 0;
+  /** Vente d'un forfait seul : ticket réglé en entier et clos aussitôt (rien à traiter à l'atelier). */
+  const sellForfait = (c: Cust, at: Date): number => {
+    if (at > now) return 0;
+    const f = weighted(forfaits, (x) => (x.grams === 23_000 ? 60 : 20));
+    const fid = randomUUID();
+    const ag = worker(at);
+    c.balance += f.grams;
+    number++;
+    orders.push({
+      id: fid, number, customerId: c.id, status: "RETIREE", isExpress: false, expressRatePct: 0, subtotal: f.price, expressAmount: 0,
+      discountType: null, discountValue: 0, discountAmount: 0, total: f.price, amountPaid: f.price, dueAt: at, notes: null,
+      idempotencyKey: randomUUID(), createdBy: ag.id, createdAt: at, updatedAt: at, readyAt: at, collectedAt: at, collectedBy: ag.id,
+      cancelledAt: null, cancelledBy: null, cancelReason: null,
+    });
+    itemsRows.push({ orderId: fid, lineNo: 1, kind: "FORFAIT", forfaitId: f.id, weightGrams: f.grams, itemLabel: f.name, serviceLabel: "Forfait", unitPrice: f.price, quantity: 1, lineTotal: f.price });
+    history.push({ orderId: fid, fromStatus: null, toStatus: "DEPOSEE", changedBy: ag.id, changedAt: at });
+    history.push({ orderId: fid, fromStatus: "DEPOSEE", toStatus: "RETIREE", changedBy: ag.id, changedAt: at, reason: "Vente de forfait" });
+    addPayment(fid, f.price, addH(at, 0.01));
+    moves.push({ customerId: c.id, orderId: fid, kind: "ACHAT", grams: f.grams, label: `Achat ${f.name}`, createdBy: ag.id, createdAt: at });
+    return f.price;
+  };
   /** Génère les dépôts d'un mois pour un montant total de commandes `target`. */
   const genMonth = (mo: (typeof months)[number], target: number) => {
     seed = 20251216 + 7919 * months.indexOf(mo); // même aléa à chaque essai du mois
@@ -327,22 +348,17 @@ async function main() {
         }
         c.visits++; c.lastAt = when; c.firstAt ??= when;
 
-        // Articles : à la pièce, ou linge au kilo pour les clients au forfait (achat d'un forfait quand le solde ne suffit plus).
+        // Articles : à la pièce, ou linge au kilo. Un forfait se vend toujours seul (ticket à part, réglé et clos aussitôt) :
+        // le client au forfait le rachète au comptoir juste avant son dépôt quand son solde ne suffit plus.
         const id = randomUUID();
         // Linge au kilo : surtout les clients au forfait, parfois les autres (payé au prix du kilo).
         const kiloOrder = kiloTypes.length > 0 && (c.kilo ? chance(0.85) : chance(0.04));
         const lines: { cat: (typeof catalog)[number]; qty: number; price: number; description: string | null }[] = [];
         const special: Omit<typeof s.orderItems.$inferInsert, "orderId" | "lineNo">[] = [];
-        let forfaitPrice = 0;
         if (kiloOrder) {
           const grams = int(30, 120) * 100;
           const kt = weighted(kiloTypes, (k) => (k.sortOrder === 0 ? 60 : 15));
-          if (c.kilo && c.balance < grams) {
-            const f = weighted(forfaits, (x) => (x.grams === 23_000 ? 60 : 20));
-            c.balance += f.grams; forfaitPrice = f.price;
-            special.push({ kind: "FORFAIT", forfaitId: f.id, weightGrams: f.grams, itemLabel: f.name, serviceLabel: "Forfait", unitPrice: f.price, quantity: 1, lineTotal: f.price });
-            moves.push({ customerId: c.id, orderId: id, kind: "ACHAT", grams: f.grams, label: `Achat ${f.name}`, createdBy: "", createdAt: when });
-          }
+          if (c.kilo && c.balance < grams) dayTotal += sellForfait(c, new Date(when.getTime() - int(2, 4) * 60_000));
           const description = chance(0.5) ? pick(KILO_DESCRIPTIONS) : null;
           if (c.kilo) {
             c.balance -= grams;
@@ -392,7 +408,7 @@ async function main() {
         const pickupDelayDays = recent && chance(0.5) ? 2 + rnd() * 6 : c.regular ? 0.2 + rnd() * rnd() * 9 : 0.5 + rnd() * 14;
         const collectedAt = shopHours(addH(readyAt, pickupDelayDays * 24));
         // Un forfait se règle entièrement à l'achat.
-        const deposit = cancelled ? 0 : forfaitPrice > 0 ? total : chance(0.36) ? total : chance(0.45) ? Math.min(total, Math.round((total * (0.3 + rnd() * 0.4)) / 500) * 500) : 0;
+        const deposit = cancelled ? 0 : chance(0.36) ? total : chance(0.45) ? Math.min(total, Math.round((total * (0.3 + rnd() * 0.4)) / 500) * 500) : 0;
         const agent = worker(when);
         for (let m = moves.length - 1; m >= 0 && moves[m].orderId === id; m--) moves[m].createdBy = agent.id;
         let status: s.OrderStatus = "DEPOSEE";
@@ -433,6 +449,8 @@ async function main() {
           color: chance(0.55) ? pick(COLORS) : null, brand: chance(0.25) ? pick(BRANDS) : null, observations: chance(0.12) ? pick(OBS) : null,
         }));
         dayTotal += total;
+        // Parfois, le client au forfait rachète un forfait d'avance en repartant (solde presque épuisé).
+        if (kiloOrder && c.kilo && c.balance < 5000 && chance(0.25)) dayTotal += sellForfait(c, new Date(when.getTime() + int(3, 6) * 60_000));
         dayOrders.push({ when });
       }
       monthAccum += dayTotal;
