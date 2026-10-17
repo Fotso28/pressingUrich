@@ -136,6 +136,14 @@ test.describe.serial("Parcours du comptoir", () => {
     await page.getByRole("link", { name: /Toutes ses commandes/ }).click();
     await expect(page.getByText("Commandes de")).toBeVisible();
     await expect(page.getByRole("link", { name: "Client Forfait Test" })).toBeVisible();
+    // Page Forfaits : solde du client, mouvements du mois, export CSV.
+    await page.goto("/forfaits");
+    await expect(page.getByRole("heading", { name: "Forfaits" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Client Forfait Test.*16,5 kg/ }).first()).toBeVisible(); // dernier mouvement en tête
+    await expect(page.getByText(/Client Forfait Test · Consommation/).first()).toBeVisible();
+    const csv = await page.request.get("/api/export/forfaits?periode=mois");
+    expect(csv.status()).toBe(200);
+    expect(await csv.text()).toContain("Client Forfait Test");
   });
 
   test("clôture de caisse sans écart", async ({ page }) => {

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  Home, PackagePlus, ClipboardList, Users, Wallet, BarChart3, Settings2, LogOut, Plus, ReceiptText, Menu, X, Banknote,
+  Home, PackagePlus, ClipboardList, Users, Wallet, BarChart3, Settings2, LogOut, Plus, ReceiptText, Menu, X, Banknote, Scale,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { authClient } from "@/lib/auth-client";
@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/caisse", label: "Caisse", icon: Wallet },
   { href: "/encaissements", label: "Encaissements", icon: Banknote },
+  { href: "/forfaits", label: "Forfaits", icon: Scale },
   { href: "/depenses", label: "Dépenses", icon: ReceiptText, admin: true },
   { href: "/rapports", label: "Rapports", icon: BarChart3, admin: true },
   { href: "/parametres/pressing", label: "Paramètres", icon: Settings2, admin: true, match: (p) => p.startsWith("/parametres") },

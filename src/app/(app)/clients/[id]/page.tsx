@@ -65,7 +65,10 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
       {(forfait.moves.length > 0 || user.role === "ADMIN") && (
         <Card className="mt-6">
           <CardHeader title="Forfait au kilo" description={`Solde : ${formatKg(forfait.balanceGrams)}`}
-            action={user.role === "ADMIN" ? <AdjustForfaitButton customerId={c.id} /> : <Scale className="size-4 text-ink-3" />} />
+            action={<div className="flex items-center gap-2">
+              <Button asChild size="sm" variant="secondary"><Link href={`/forfaits?periode=tout&client=${c.id}`}><Scale />Tout l&apos;historique</Link></Button>
+              {user.role === "ADMIN" && <AdjustForfaitButton customerId={c.id} />}
+            </div>} />
           {forfait.moves.length === 0 ? <EmptyState title="Aucun mouvement">Le client achète un forfait au dépôt (onglet « Au kilo »).</EmptyState> : (
             <ul className="divide-y divide-line border-t border-line">
               {forfait.moves.map((m) => (

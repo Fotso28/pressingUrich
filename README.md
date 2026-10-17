@@ -25,6 +25,7 @@ Elle suit le dossier de conception (PRD, TRD, App Flow, UI/UX, schéma, plan d'i
 - **Forfaits** : le client achète un poids de linge à l'avance (au départ 15 000 = 17 kg, 20 000 = 23 kg,
   30 000 = 37 kg, modifiables) ; ses dépôts au kilo en sont déduits en priorité, le reste est payé au prix du kilo.
   Solde et historique sur sa fiche, corrigeables par le gérant. Vente et déduction de forfait : en ligne seulement.
+  Page **Forfaits** : soldes de tous les clients, ventes et consommations par jour / mois / période, export CSV.
 - **WhatsApp** : récapitulatif du dépôt à l'enregistrement, « commande prête » quand elle l'est (lien wa.me ;
   le préfixe 237 est ajouté au numéro s'il manque).
 - **Commandes** : onglets par statut, filtres (retard, impayées, client, **jour / mois / période**), actions
