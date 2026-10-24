@@ -110,23 +110,26 @@ const IF_EMPTY = process.argv.includes("--if-empty");
 
 /**
  * Passage en production réelle : `PURGE_DEMO_DATA=1` (une seule fois, au build) efface le jeu de démonstration —
- * commandes, clients, caisses, paiements, dépenses, sorties, numéros réservés et comptes de démo (paul, brigitte).
- * Le catalogue, les paramètres et le compte du gérant sont conservés. Sans effet si la base n'est pas une base de démo.
+ * commandes, clients, caisses, paiements, dépenses, sorties, numéros réservés et tous les comptes sauf les gérants
+ * (ADMIN) — puis déconnecte tout le monde (sessions supprimées). Le catalogue, les paramètres et les comptes gérants
+ * sont conservés. Ne s'exécute qu'une fois : la marque `demo_purged` (app_meta) empêche toute nouvelle purge et
+ * toute régénération du jeu de démonstration.
  */
 async function purgeDemo(db: ReturnType<typeof drizzleNeon<typeof s>>) {
-  const [meta] = await db.select().from(s.appMeta).where(eq(s.appMeta.key, "demo_version")).limit(1);
-  if (!meta) { console.log("PURGE_DEMO_DATA : pas de jeu de démonstration dans cette base, rien n'est effacé."); return; }
+  const [done] = await db.select().from(s.appMeta).where(eq(s.appMeta.key, "demo_purged")).limit(1);
+  if (done) { console.log(`PURGE_DEMO_DATA : purge déjà faite le ${done.value}, rien n'est effacé.`); return; }
   await db.execute(sql`TRUNCATE forfait_moves, offline_ops, reserved_numbers, outflows, cash_session_counts, expenses, payments, order_status_history, order_items, orders, cash_sessions, customers RESTART IDENTITY CASCADE`);
   await db.execute(sql`ALTER SEQUENCE order_number_seq RESTART WITH 1`);
-  const demo = await db.select({ id: s.user.id }).from(s.user).where(sql`${s.user.username} in ('paul', 'brigitte')`);
-  for (const d of demo) {
-    await db.delete(s.session).where(eq(s.session.userId, d.id));
-    await db.delete(s.account).where(eq(s.account.userId, d.id));
-    await db.delete(s.user).where(eq(s.user.id, d.id));
+  const others = await db.select({ id: s.user.id }).from(s.user).where(sql`${s.user.role} <> 'ADMIN'`);
+  for (const u of others) {
+    await db.delete(s.account).where(eq(s.account.userId, u.id));
+    await db.delete(s.user).where(eq(s.user.id, u.id));
   }
+  await db.delete(s.session);
   await db.update(s.user).set({ monthlySalary: null });
   await db.delete(s.appMeta).where(eq(s.appMeta.key, "demo_version"));
-  console.log(`Jeu de démonstration effacé (${demo.length} compte(s) de démo supprimé(s)). Base prête pour la production.`);
+  await db.insert(s.appMeta).values({ key: "demo_purged", value: new Date().toISOString() });
+  console.log(`Jeu de démonstration effacé (${others.length} compte(s) non gérant supprimé(s), toutes les sessions fermées). Base prête pour la production.`);
 }
 
 async function main() {
@@ -146,6 +149,8 @@ async function main() {
   }
 
   if (purge) { await purgeDemo(db); await close(); return; }
+  const [purged] = await db.select().from(s.appMeta).where(eq(s.appMeta.key, "demo_purged")).limit(1);
+  if (purged && IF_EMPTY) { console.log("Base passée en production (demo_purged) : seed de démonstration ignoré."); await close(); return; }
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(s.orders);
   const [meta] = await db.select().from(s.appMeta).where(eq(s.appMeta.key, "demo_version")).limit(1);
   let reset = process.env.DEMO_RESET === "1";
